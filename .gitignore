@@ -1,0 +1,12 @@
+/.idea/
+/.vscode/
+/*.iml
+/.DS_Store
+/.env
+/.env.*
+/*.log
+/node_modules/
+/target/
+**/*.rs.bk
+/web_config.json
+Thumbs.db

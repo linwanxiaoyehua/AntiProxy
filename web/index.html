@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AntiProxy</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+  <div class="bg-orbit"></div>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">
+          <img src="/logo.svg" alt="AntiProxy logo" />
+        </div>
+        <div class="brand-text">
+          <span>AntiProxy</span>
+          <small>Web Console</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-link active" data-tab="overview" type="button">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="2" fill="none" />
+              <rect x="14" y="3" width="7" height="5" rx="2" fill="none" />
+              <rect x="14" y="10" width="7" height="11" rx="2" fill="none" />
+              <rect x="3" y="12" width="7" height="9" rx="2" fill="none" />
+            </svg>
+          </span>
+          Overview
+        </button>
+        <button class="nav-link" data-tab="proxy" type="button">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 7.5l1.5-1.5a4.5 4.5 0 0 1 6.4 6.4L15.4 13" />
+              <path d="M15 16.5l-1.5 1.5a4.5 4.5 0 0 1-6.4-6.4L8.6 11" />
+            </svg>
+          </span>
+          API Proxy
+        </button>
+        <button class="nav-link" data-tab="accounts" type="button">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="8" r="3" />
+              <path d="M4 20c1.6-3.6 13.4-3.6 16 0" />
+            </svg>
+          </span>
+          Accounts
+        </button>
+      </nav>
+      <div class="auth">
+        <label class="key-label" for="apiKeyInput">API Key</label>
+        <div class="key-box">
+          <input id="apiKeyInput" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+          <button class="ghost" id="toggleKeyBtn" type="button">Show</button>
+          <button class="primary" id="saveKeyBtn" type="button">Save</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="overview" class="section tab-page active">
+        <div class="section-head">
+          <div>
+            <h1 class="title-with-icon">
+              <span class="title-icon icon-slate">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="3" width="7" height="7" rx="2" fill="none" />
+                  <rect x="14" y="3" width="7" height="5" rx="2" fill="none" />
+                  <rect x="14" y="10" width="7" height="11" rx="2" fill="none" />
+                  <rect x="3" y="12" width="7" height="9" rx="2" fill="none" />
+                </svg>
+              </span>
+              Account Overview
+            </h1>
+            <p class="muted">Manage accounts and refresh quotas in a single panel.</p>
+          </div>
+          <div class="section-actions">
+            <button class="secondary" id="refreshAllBtn" type="button">Refresh All Quotas</button>
+          </div>
+        </div>
+
+        <div id="summaryGrid" class="summary-grid"></div>
+
+        <div class="split">
+          <div class="panel" id="currentAccountPanel">
+            <div class="panel-head">
+              <h2 class="title-with-icon">
+                <span class="title-icon icon-emerald">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="8" r="3" />
+                    <path d="M4 20c1.6-3.6 13.4-3.6 16 0" />
+                  </svg>
+                </span>
+                Current Account
+              </h2>
+              <span class="pill" id="currentAccountBadge">None</span>
+            </div>
+            <div class="panel-body" id="currentAccountBody">
+              <div class="empty">No account selected.</div>
+            </div>
+          </div>
+
+          <div class="panel" id="addAccountPanel">
+            <div class="panel-head">
+              <h2 class="title-with-icon">
+                <span class="title-icon icon-blue">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="8" r="3" />
+                    <path d="M4 20c1.6-3.6 13.4-3.6 16 0" />
+                    <path d="M18 6v4M16 8h4" />
+                  </svg>
+                </span>
+                Add Account
+              </h2>
+              <span class="pill soft">AntiProxy Auth</span>
+            </div>
+            <div class="panel-body">
+              <div class="oauth-box">
+                <div class="oauth-title">AntiProxy Auth</div>
+                <p class="muted">Recommended: authorize once and add the account automatically.</p>
+                <div class="oauth-steps">
+                  <div class="oauth-steps-title">Authorization Steps:</div>
+                  <ol>
+                    <li>Click the button below to open the authorization page in your browser.</li>
+                    <li>Sign in with your Google account and grant access.</li>
+                    <li>After authorization, the credential file is saved automatically.</li>
+                    <li>You can view and manage the credential file in Upload Config Manager.</li>
+                  </ol>
+                </div>
+                <button class="primary full" id="oauthStartBtn" type="button">Start OAuth Login</button>
+                <div class="oauth-link-group hidden" id="oauthLinkBox">
+                  <span class="oauth-link-label">Authorization Link</span>
+                  <div class="oauth-link">
+                    <code id="oauthLinkText">https://accounts.google.com/...</code>
+                    <button class="ghost small" id="oauthOpenBtn" type="button">Open in Browser</button>
+                    <button class="ghost small" id="oauthCopyBtn" type="button">Copy Link</button>
+                  </div>
+                </div>
+                <div class="helper oauth-status" id="oauthStatus"></div>
+                <div class="oauth-fallback" id="oauthFallbackBox">
+                  <div class="oauth-fallback-head">
+                    <span class="oauth-fallback-icon">!</span>
+                    <div>
+                      <div class="oauth-fallback-title">Callback Not Reachable?</div>
+                      <p class="oauth-fallback-text">If the authorization window redirects to a "Cannot reach this page" error, paste the full URL from the address bar below.</p>
+                    </div>
+                  </div>
+                  <div class="oauth-fallback-form">
+                    <input id="oauthCallbackInput" type="text" placeholder="Paste callback URL (including code=...)" />
+                    <button class="primary" id="oauthCallbackSubmit" type="button">Submit</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="divider">OR</div>
+
+              <label class="field">
+                <span>Refresh Token</span>
+                <textarea id="refreshTokenInput" rows="4" placeholder="Paste refresh token"></textarea>
+              </label>
+              <button class="ghost full" id="addAccountBtn" type="button">Add via Token</button>
+              <div class="helper">Tokens are stored locally in the accounts folder.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="proxy" class="section tab-page">
+        <div class="section-head">
+          <div>
+            <h2 class="title-with-icon">
+              <span class="title-icon icon-indigo">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 7.5l1.5-1.5a4.5 4.5 0 0 1 6.4 6.4L15.4 13" />
+                  <path d="M15 16.5l-1.5 1.5a4.5 4.5 0 0 1-6.4-6.4L8.6 11" />
+                </svg>
+              </span>
+              API Proxy
+            </h2>
+            <p class="muted">Use the local proxy with OpenAI, Anthropic, or Gemini-compatible clients.</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3 class="title-with-icon">
+                <span class="title-icon icon-amber">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="6" cy="6" r="2" />
+                    <circle cx="18" cy="6" r="2" />
+                    <circle cx="12" cy="18" r="2" />
+                    <path d="M6 8v2a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4V8" />
+                  </svg>
+                </span>
+                Model Router
+              </h3>
+              <p class="muted">Map popular model families to your preferred upstream targets.</p>
+            </div>
+            <div class="panel-actions">
+              <span class="pill soft">Mapping</span>
+              <button class="ghost" id="resetMappingBtn" type="button">Reset</button>
+            </div>
+          </div>
+
+          <div class="router-grid">
+            <div class="router-card">
+              <div class="router-card-head">
+                <div class="router-icon router-blue">C4</div>
+                <div>
+                  <strong>Claude 4.5 Series</strong>
+                  <span class="muted">Opus, Sonnet, Haiku</span>
+                </div>
+              </div>
+              <select class="router-select" data-mapping-scope="anthropic"
+                data-mapping-key="claude-4.5-series"></select>
+            </div>
+            <div class="router-card">
+              <div class="router-card-head">
+                <div class="router-icon router-purple">C3</div>
+                <div>
+                  <strong>Claude 3.5 Series</strong>
+                  <span class="muted">Sonnet, Haiku</span>
+                </div>
+              </div>
+              <select class="router-select" data-mapping-scope="anthropic"
+                data-mapping-key="claude-3.5-series"></select>
+            </div>
+            <div class="router-card">
+              <div class="router-card-head">
+                <div class="router-icon router-indigo">G4</div>
+                <div>
+                  <strong>GPT-4 Series</strong>
+                  <span class="muted">o1, o3, gpt-4</span>
+                </div>
+              </div>
+              <select class="router-select" data-mapping-scope="openai" data-mapping-key="gpt-4-series"></select>
+            </div>
+            <div class="router-card">
+              <div class="router-card-head">
+                <div class="router-icon router-emerald">4o</div>
+                <div>
+                  <strong>GPT-4o / 3.5</strong>
+                  <span class="muted">4o, turbo, mini</span>
+                </div>
+              </div>
+              <select class="router-select" data-mapping-scope="openai" data-mapping-key="gpt-4o-series"></select>
+            </div>
+            <div class="router-card">
+              <div class="router-card-head">
+                <div class="router-icon router-amber">G5</div>
+                <div>
+                  <strong>GPT-5 Series</strong>
+                  <span class="muted">gpt-5, gpt-5.1</span>
+                </div>
+              </div>
+              <select class="router-select" data-mapping-scope="openai" data-mapping-key="gpt-5-series"></select>
+            </div>
+          </div>
+
+          <div class="router-custom">
+            <div class="router-custom-head">
+              <h4>Custom Mapping</h4>
+              <span class="muted">Exact model name overrides for special routing.</span>
+            </div>
+            <div class="router-form">
+              <input id="customMappingSource" type="text" placeholder="Original model id (e.g. gpt-4.1)" />
+              <select id="customMappingTarget"></select>
+              <button class="secondary" id="addCustomMappingBtn" type="button">Add Mapping</button>
+            </div>
+            <div id="customMappingList" class="mapping-table"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3 class="title-with-icon">
+                <span class="title-icon icon-purple">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3l9 5-9 5-9-5 9-5z" />
+                    <path d="M3 13l9 5 9-5" />
+                  </svg>
+                </span>
+                Multi-Protocol Support
+              </h3>
+              <p class="muted">Pick the API style that matches your client.</p>
+            </div>
+            <span class="pill">OpenAI / Anthropic / Gemini</span>
+          </div>
+
+          <div class="protocol-grid" id="protocolGrid">
+            <div class="protocol-card" data-protocol="openai">
+              <div class="protocol-head">
+                <span>OpenAI</span>
+                <button class="ghost small" data-copy="openai-base" type="button">Base</button>
+              </div>
+              <div class="protocol-body">
+                <code data-endpoint="openai-chat">/v1/chat/completions</code>
+                <code data-endpoint="openai-completions">/v1/completions</code>
+                <code data-endpoint="openai-responses">/v1/responses</code>
+              </div>
+            </div>
+            <div class="protocol-card" data-protocol="anthropic">
+              <div class="protocol-head">
+                <span>Anthropic</span>
+                <button class="ghost small" data-copy="anthropic-base" type="button">Copy</button>
+              </div>
+              <div class="protocol-body">
+                <code data-endpoint="anthropic-messages">/v1/messages</code>
+              </div>
+            </div>
+            <div class="protocol-card" data-protocol="gemini">
+              <div class="protocol-head">
+                <span>Gemini</span>
+                <button class="ghost small" data-copy="gemini-base" type="button">Copy</button>
+              </div>
+              <div class="protocol-body">
+                <code data-endpoint="gemini-models">/v1beta/models/...</code>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3 class="title-with-icon">
+                <span class="title-icon icon-teal">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6h16v12H4z" />
+                    <path d="M7 10l3 2-3 2" />
+                    <path d="M12 14h5" />
+                  </svg>
+                </span>
+                Supported Models & Integration
+              </h3>
+              <p class="muted">Select a model to see a ready-to-run example.</p>
+            </div>
+            <span class="pill">Quick Integration</span>
+          </div>
+
+          <div class="integration-grid">
+            <div>
+              <div class="model-table-head">
+                <span>Model ID</span>
+                <span>Action</span>
+              </div>
+              <div id="modelList" class="model-table"></div>
+            </div>
+            <div class="code-panel">
+              <div class="code-head">
+                <span id="protocolBadge" class="badge">OpenAI SDK</span>
+                <button class="ghost small" id="copyExampleBtn" type="button">Copy</button>
+              </div>
+              <pre id="codeSample" class="code-sample"></pre>
+              <div class="code-footer">Tip: clicking a protocol card changes the example.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="accounts" class="section tab-page">
+        <div class="section-head">
+          <div>
+            <h2 class="title-with-icon">
+              <span class="title-icon icon-slate">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="8" r="3" />
+                  <path d="M4 20c1.6-3.6 13.4-3.6 16 0" />
+                </svg>
+              </span>
+              Accounts
+            </h2>
+            <p class="muted">Accounts with Gemini/Claude averages in one view.</p>
+          </div>
+        </div>
+        <div class="table-head accounts-head">
+          <span>Account</span>
+          <span>Status</span>
+          <span>Tier</span>
+          <span>Gemini Avg</span>
+          <span>Claude Avg</span>
+          <span>Actions</span>
+        </div>
+        <div id="accountsList" class="table-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+
+</html>
