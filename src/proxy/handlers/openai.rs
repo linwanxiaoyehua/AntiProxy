@@ -35,19 +35,20 @@ enum ExecuteResult {
     /// 成功的非流式响应 (Gemini 原始 JSON)
     JsonResponse(Value),
     /// 需要重试
-    Retry { error: String },
+    Retry { error: String, should_rotate: bool },
     /// 不可重试的错误
     FatalError { status: StatusCode, message: String },
 }
 
-/// 核心请求执行函数 - 消除 handle_chat_completions 和 handle_completions 之间的重复代码
-async fn execute_openai_request(
+/// 核心请求执行函数 V2 - 接受预计算的 session_id 和 force_rotate 参数
+/// 解决了原版本中 session_id 在函数内部计算导致重试时账号切换的问题
+async fn execute_openai_request_v2(
     state: &AppState,
     openai_req: &OpenAIRequest,
     upstream: Arc<UpstreamClient>,
     token_manager: Arc<TokenManager>,
-    attempt: usize,
-    max_attempts: usize,
+    force_rotate: bool,
+    session_id: &str,
     response_format: ResponseFormat,
 ) -> ExecuteResult {
     // 1. 模型路由与配置解析
@@ -77,12 +78,9 @@ async fn execute_openai_request(
         "gemini"
     };
 
-    // 2. 提取 SessionId (粘性指纹)
-    let session_id = SessionManager::extract_openai_session_id(openai_req);
-
-    // 3. 获取 Token
+    // 2. 获取 Token (使用传入的 session_id 和 force_rotate)
     let selected = match token_manager
-        .get_token(quota_group, &config.request_type, attempt > 0, Some(&session_id))
+        .get_token(quota_group, &config.request_type, force_rotate, Some(session_id))
         .await
     {
         Ok(t) => t,
@@ -101,14 +99,14 @@ async fn execute_openai_request(
 
     info!("✓ Using account: {} (type: {})", email, config.request_type);
 
-    // 4. 转换请求
+    // 3. 转换请求
     let gemini_body = transform_openai_request(openai_req, &project_id, &mapped_model);
 
     if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body) {
         debug!("[OpenAI-Request] Transformed Gemini Body:\n{}", body_json);
     }
 
-    // 5. 发送请求
+    // 4. 发送请求
     let is_stream = openai_req.stream;
     let method = if is_stream {
         "streamGenerateContent"
@@ -123,19 +121,15 @@ async fn execute_openai_request(
     {
         Ok(r) => r,
         Err(e) => {
-            debug!(
-                "OpenAI Request failed on attempt {}/{}: {}",
-                attempt + 1,
-                max_attempts,
-                e
-            );
-            return ExecuteResult::Retry { error: e };
+            debug!("OpenAI Request failed: {}", e);
+            // 网络错误不需要轮换账号，可能是临时问题
+            return ExecuteResult::Retry { error: e, should_rotate: false };
         }
     };
 
     let status = response.status();
 
-    // 6. 处理成功响应
+    // 5. 处理成功响应
     if status.is_success() {
         if is_stream {
             let gemini_stream = response.bytes_stream();
@@ -181,7 +175,7 @@ async fn execute_openai_request(
         }
     }
 
-    // 7. 处理错误响应
+    // 6. 处理错误响应
     let status_code = status.as_u16();
     let retry_after = response
         .headers()
@@ -199,6 +193,18 @@ async fn execute_openai_request(
         error_text
     );
 
+    // 判断是否应该轮换账号
+    fn should_rotate_account(status_code: u16) -> bool {
+        match status_code {
+            // 这些错误是账号级别的，需要轮换
+            429 | 401 | 403 | 500 => true,
+            // 这些错误是服务端级别的，轮换账号无意义
+            400 | 503 | 529 => false,
+            // 其他错误默认不轮换
+            _ => false,
+        }
+    }
+
     // 429/529/503/500 智能处理
     if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
         token_manager.mark_rate_limited(
@@ -213,42 +219,40 @@ async fn execute_openai_request(
         if let Some(delay_ms) = crate::proxy::upstream::retry::parse_retry_delay(&error_text) {
             let actual_delay = delay_ms.saturating_add(200).min(10_000);
             tracing::warn!(
-                "OpenAI Upstream {} on {} attempt {}/{}, waiting {}ms then retrying",
+                "OpenAI Upstream {} on {}, waiting {}ms then retrying",
                 status_code,
                 email,
-                attempt + 1,
-                max_attempts,
                 actual_delay
             );
             tokio::time::sleep(tokio::time::Duration::from_millis(actual_delay)).await;
             return ExecuteResult::Retry {
                 error: format!("HTTP {}: {}", status_code, error_text),
+                should_rotate: should_rotate_account(status_code),
             };
         }
 
         tracing::warn!(
-            "OpenAI Upstream {} on {} attempt {}/{}, rotating account",
+            "OpenAI Upstream {} on {}, will rotate: {}",
             status_code,
             email,
-            attempt + 1,
-            max_attempts
+            should_rotate_account(status_code)
         );
         return ExecuteResult::Retry {
             error: format!("HTTP {}: {}", status_code, error_text),
+            should_rotate: should_rotate_account(status_code),
         };
     }
 
     // 401/403 触发账号轮换
     if status_code == 403 || status_code == 401 {
         tracing::warn!(
-            "OpenAI Upstream {} on account {} attempt {}/{}, rotating account",
+            "OpenAI Upstream {} on account {}, rotating account",
             status_code,
-            email,
-            attempt + 1,
-            max_attempts
+            email
         );
         return ExecuteResult::Retry {
             error: format!("HTTP {}: {}", status_code, error_text),
+            should_rotate: true,
         };
     }
 
@@ -263,6 +267,30 @@ async fn execute_openai_request(
     }
 }
 
+/// 核心请求执行函数 - 保留用于向后兼容（已废弃，请使用 execute_openai_request_v2）
+#[allow(dead_code)]
+async fn execute_openai_request(
+    state: &AppState,
+    openai_req: &OpenAIRequest,
+    upstream: Arc<UpstreamClient>,
+    token_manager: Arc<TokenManager>,
+    attempt: usize,
+    _max_attempts: usize,
+    response_format: ResponseFormat,
+) -> ExecuteResult {
+    // 兼容旧调用：attempt > 0 时强制轮换
+    let session_id = SessionManager::extract_openai_session_id(openai_req);
+    execute_openai_request_v2(
+        state,
+        openai_req,
+        upstream,
+        token_manager,
+        attempt > 0,
+        &session_id,
+        response_format,
+    ).await
+}
+
 /// 执行带重试的请求循环
 async fn execute_with_retry(
     state: &AppState,
@@ -274,16 +302,20 @@ async fn execute_with_retry(
     let pool_size = token_manager.len();
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
 
-    let mut last_error = String::new();
+    // [CRITICAL FIX] 提前计算 session_id，确保重试时不会改变
+    let stable_session_id = SessionManager::extract_openai_session_id(openai_req);
 
-    for attempt in 0..max_attempts {
-        match execute_openai_request(
+    let mut last_error = String::new();
+    let mut force_rotate_next = false;  // 控制下一次循环是否轮换账号
+
+    for _attempt in 0..max_attempts {
+        match execute_openai_request_v2(
             state,
             openai_req,
             upstream.clone(),
             token_manager.clone(),
-            attempt,
-            max_attempts,
+            force_rotate_next,
+            &stable_session_id,
             response_format,
         )
         .await
@@ -329,8 +361,9 @@ async fn execute_with_retry(
                 };
                 return Ok(response);
             }
-            ExecuteResult::Retry { error } => {
+            ExecuteResult::Retry { error, should_rotate } => {
                 last_error = error;
+                force_rotate_next = should_rotate;
                 continue;
             }
             ExecuteResult::FatalError { status, message } => {

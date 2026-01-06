@@ -251,6 +251,12 @@ impl TokenManager {
         }
         let scope_group = Self::scope_group(quota_group, request_type);
 
+        // [DEBUG] 追踪账号选择逻辑
+        tracing::info!(
+            "[TokenManager] get_token called: group={}, type={}, force_rotate={}, session_id={:?}",
+            quota_group, request_type, force_rotate, session_id
+        );
+
         // ===== 【优化】根据订阅等级排序 (优先级: ULTRA > PRO > FREE) =====
         // 理由: ULTRA/PRO 重置快，优先消耗；FREE 重置慢，用于兜底
         tokens_snapshot.sort_by(|a, b| {
@@ -280,9 +286,16 @@ impl TokenManager {
             if !rotate && session_id.is_some() && scheduling.mode != SchedulingMode::PerformanceFirst {
                 let sid = session_id.unwrap();
                 let session_key = Self::session_key(&scope_group, sid);
-                
+
+                // [DEBUG] 追踪会话绑定查找
+                let bound_account = self.session_accounts.get(&session_key).map(|v| v.clone());
+                tracing::info!(
+                    "[TokenManager] Session lookup: key={}, bound_account={:?}",
+                    session_key, bound_account
+                );
+
                 // 1. 检查会话是否已绑定账号
-                if let Some(bound_id) = self.session_accounts.get(&session_key).map(|v| v.clone()) {
+                if let Some(bound_id) = bound_account {
                     // 2. 检查绑定的账号是否限流 (使用精准的剩余时间接口)
                     let reset_sec = self.rate_limit_tracker.get_remaining_wait(&scope_group, &bound_id);
                     if reset_sec > 0 {
@@ -303,7 +316,10 @@ impl TokenManager {
                             }
                         } else {
                             // 平衡模式或等待时间过长：断开绑定，准备换号
-                            tracing::warn!("Avoidance/WaitTimeout: Session {} switching from {} (remaining wait: {}s > limit: {}s).", sid, bound_id, reset_sec, scheduling.max_wait_seconds);
+                            tracing::warn!(
+                                "Avoidance: Session {} switching from {} (mode={:?}, remaining={}s, limit={}s)",
+                                sid, bound_id, scheduling.mode, reset_sec, scheduling.max_wait_seconds
+                            );
                             self.session_accounts.remove(&session_key);
                         }
                     } else if !attempted.contains(&bound_id) {
@@ -524,6 +540,12 @@ impl TokenManager {
                     }
                 }
             };
+
+            // [DEBUG] 追踪最终选择的账号
+            tracing::info!(
+                "[TokenManager] Selected account: {} (id: {}), session_id: {:?}",
+                token.email, token.account_id, session_id
+            );
 
             return Ok(SelectedToken {
                 access_token: token.access_token,

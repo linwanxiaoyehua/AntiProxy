@@ -29,8 +29,10 @@ pub struct StickySessionConfig {
 impl Default for StickySessionConfig {
     fn default() -> Self {
         Self {
-            mode: SchedulingMode::Balance,
-            max_wait_seconds: 60,
+            // 默认使用 CacheFirst 模式，避免单个会话中多账号消耗
+            // 当账号被限流时，会等待（最多 max_wait_seconds）而不是切换账号
+            mode: SchedulingMode::CacheFirst,
+            max_wait_seconds: 120,  // 最多等待 2 分钟
         }
     }
 }

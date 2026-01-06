@@ -36,8 +36,12 @@ pub async fn handle_generate(
     let token_manager = state.token_manager;
     let pool_size = token_manager.len();
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
-    
+
+    // [CRITICAL FIX] 提前计算 session_id，确保重试时不会改变
+    let stable_session_id = SessionManager::extract_gemini_session_id(&body, &model_name);
+
     let mut last_error = String::new();
+    let mut force_rotate_next = false;  // 控制下一次循环是否轮换账号
 
     for attempt in 0..max_attempts {
         // 3. 模型路由与配置解析
@@ -63,14 +67,10 @@ pub async fn handle_generate(
 
         let config = crate::proxy::mappers::common_utils::resolve_request_config(&model_name, &mapped_model, &tools_val);
 
-        // 4. 获取 Token (使用准确的 request_type)
-        // 提取 SessionId (粘性指纹)
-        let session_id = SessionManager::extract_gemini_session_id(&body, &model_name);
-
-        // 关键：在重试尝试 (attempt > 0) 时强制轮换账号
+        // 4. 获取 Token (使用预计算的 session_id 和 force_rotate_next)
         let quota_group = "gemini";
         let selected = match token_manager
-            .get_token(quota_group, &config.request_type, attempt > 0, Some(&session_id))
+            .get_token(quota_group, &config.request_type, force_rotate_next, Some(&stable_session_id))
             .await
         {
             Ok(t) => t,
@@ -193,8 +193,20 @@ pub async fn handle_generate(
         let retry_after = response.headers().get("Retry-After").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
         let error_text = response.text().await.unwrap_or_else(|_| format!("HTTP {}", status_code));
         last_error = format!("HTTP {}: {}", status_code, error_text);
- 
-        // 只有 429 (限流), 529 (过载), 503, 403 (权限) 和 401 (认证失效) 触发账号轮换
+
+        // 判断是否应该轮换账号
+        fn should_rotate_account(status_code: u16) -> bool {
+            match status_code {
+                // 这些错误是账号级别的，需要轮换
+                429 | 401 | 403 | 500 => true,
+                // 这些错误是服务端级别的，轮换账号无意义
+                400 | 503 | 529 => false,
+                // 其他错误默认不轮换
+                _ => false,
+            }
+        }
+
+        // 只有 429 (限流), 529 (过载), 503, 403 (权限) 和 401 (认证失效) 触发重试
         if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 || status_code == 403 || status_code == 401 {
             // 记录限流信息 (全局同步)
             token_manager.mark_rate_limited(
@@ -206,10 +218,15 @@ pub async fn handle_generate(
                 &error_text,
             );
 
-            tracing::warn!("Gemini Upstream {} on account {} attempt {}/{}, rotating account", status_code, email, attempt + 1, max_attempts);
+            // 根据错误类型决定是否轮换账号
+            force_rotate_next = should_rotate_account(status_code);
+            tracing::warn!(
+                "Gemini Upstream {} on account {}, will rotate: {}",
+                status_code, email, force_rotate_next
+            );
             continue;
         }
- 
+
         // 404 等由于模型配置或路径错误的 HTTP 异常，直接报错，不进行无效轮换
         error!("Gemini Upstream non-retryable error {}: {}", status_code, error_text);
         return Err((status, error_text));

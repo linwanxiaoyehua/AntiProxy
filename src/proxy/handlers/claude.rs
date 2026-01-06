@@ -423,8 +423,10 @@ pub async fn handle_messages(
     for (idx, msg) in request.messages.iter().enumerate() {
         let content_preview = match &msg.content {
             crate::proxy::mappers::claude::models::MessageContent::String(s) => {
-                if s.len() > 200 {
-                    format!("{}... (total {} chars)", &s[..200], s.len())
+                // 使用 chars() 安全截取，避免 UTF-8 边界 panic
+                let preview: String = s.chars().take(200).collect();
+                if s.chars().count() > 200 {
+                    format!("{}... (total {} chars)", preview, s.chars().count())
                 } else {
                     s.clone()
                 }
@@ -433,7 +435,7 @@ pub async fn handle_messages(
                 format!("[Array with {} blocks]", arr.len())
             }
         };
-        debug!("[{}] Message[{}] - Role: {}, Content: {}", 
+        debug!("[{}] Message[{}] - Role: {}, Content: {}",
             trace_id, idx, msg.role, content_preview);
     }
     
