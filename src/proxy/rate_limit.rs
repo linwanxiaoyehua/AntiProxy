@@ -42,9 +42,14 @@ impl RateLimitTracker {
         }
     }
     
+    fn make_key(&self, quota_group: &str, account_id: &str) -> String {
+        format!("{}::{}", quota_group, account_id)
+    }
+
     /// 获取账号剩余的等待时间(秒)
-    pub fn get_remaining_wait(&self, account_id: &str) -> u64 {
-        if let Some(info) = self.limits.get(account_id) {
+    pub fn get_remaining_wait(&self, quota_group: &str, account_id: &str) -> u64 {
+        let key = self.make_key(quota_group, account_id);
+        if let Some(info) = self.limits.get(&key) {
             let now = SystemTime::now();
             if info.reset_time > now {
                 return info.reset_time.duration_since(now).unwrap_or(Duration::from_secs(0)).as_secs();
@@ -56,12 +61,14 @@ impl RateLimitTracker {
     /// 从错误响应解析限流信息
     /// 
     /// # Arguments
+    /// * `quota_group` - 配额分组 (e.g. "gemini", "claude")
     /// * `account_id` - 账号 ID
     /// * `status` - HTTP 状态码
     /// * `retry_after_header` - Retry-After header 值
     /// * `body` - 错误响应 body
     pub fn parse_from_error(
         &self,
+        quota_group: &str,
         account_id: &str,
         status: u16,
         retry_after_header: Option<&str>,
@@ -133,11 +140,13 @@ impl RateLimitTracker {
         };
         
         // 存储
-        self.limits.insert(account_id.to_string(), info.clone());
+        let key = self.make_key(quota_group, account_id);
+        self.limits.insert(key, info.clone());
         
         tracing::warn!(
-            "账号 {} [{}] 限流类型: {:?}, 重置延时: {}秒",
+            "账号 {} (group {}) [{}] 限流类型: {:?}, 重置延时: {}秒",
             account_id,
+            quota_group,
             status,
             reason,
             retry_sec
@@ -305,13 +314,14 @@ impl RateLimitTracker {
     }
     
     /// 获取账号的限流信息
-    pub fn get(&self, account_id: &str) -> Option<RateLimitInfo> {
-        self.limits.get(account_id).map(|r| r.clone())
+    pub fn get(&self, quota_group: &str, account_id: &str) -> Option<RateLimitInfo> {
+        let key = self.make_key(quota_group, account_id);
+        self.limits.get(&key).map(|r| r.clone())
     }
     
     /// 检查账号是否仍在限流中
-    pub fn is_rate_limited(&self, account_id: &str) -> bool {
-        if let Some(info) = self.get(account_id) {
+    pub fn is_rate_limited(&self, quota_group: &str, account_id: &str) -> bool {
+        if let Some(info) = self.get(quota_group, account_id) {
             info.reset_time > SystemTime::now()
         } else {
             false
@@ -319,8 +329,8 @@ impl RateLimitTracker {
     }
     
     /// 获取距离限流重置还有多少秒
-    pub fn get_reset_seconds(&self, account_id: &str) -> Option<u64> {
-        if let Some(info) = self.get(account_id) {
+    pub fn get_reset_seconds(&self, quota_group: &str, account_id: &str) -> Option<u64> {
+        if let Some(info) = self.get(quota_group, account_id) {
             info.reset_time
                 .duration_since(SystemTime::now())
                 .ok()
@@ -354,8 +364,9 @@ impl RateLimitTracker {
     
     /// 清除指定账号的限流记录
     #[allow(dead_code)]
-    pub fn clear(&self, account_id: &str) -> bool {
-        self.limits.remove(account_id).is_some()
+    pub fn clear(&self, quota_group: &str, account_id: &str) -> bool {
+        let key = self.make_key(quota_group, account_id);
+        self.limits.remove(&key).is_some()
     }
     
     /// 清除所有限流记录
@@ -410,8 +421,8 @@ mod tests {
     #[test]
     fn test_get_remaining_wait() {
         let tracker = RateLimitTracker::new();
-        tracker.parse_from_error("acc1", 429, Some("30"), "");
-        let wait = tracker.get_remaining_wait("acc1");
+        tracker.parse_from_error("gemini", "acc1", 429, Some("30"), "");
+        let wait = tracker.get_remaining_wait("gemini", "acc1");
         assert!(wait > 25 && wait <= 30);
     }
 
@@ -419,8 +430,8 @@ mod tests {
     fn test_safety_buffer() {
         let tracker = RateLimitTracker::new();
         // 如果 API 返回 1s，我们强制设为 2s
-        tracker.parse_from_error("acc1", 429, Some("1"), "");
-        let wait = tracker.get_remaining_wait("acc1");
+        tracker.parse_from_error("gemini", "acc1", 429, Some("1"), "");
+        let wait = tracker.get_remaining_wait("gemini", "acc1");
         assert_eq!(wait, 2);
     }
 }

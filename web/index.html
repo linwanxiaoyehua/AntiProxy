@@ -6,6 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AntiProxy</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="/styles.css" />
 </head>
 
@@ -148,7 +153,8 @@
                     <span class="oauth-fallback-icon">!</span>
                     <div>
                       <div class="oauth-fallback-title">Callback Not Reachable?</div>
-                      <p class="oauth-fallback-text">If the authorization window redirects to a "Cannot reach this page" error, paste the full URL from the address bar below.</p>
+                      <p class="oauth-fallback-text">If the authorization window redirects to a "Cannot reach this page"
+                        error, paste the full URL from the address bar below.</p>
                     </div>
                   </div>
                   <div class="oauth-fallback-form">
@@ -160,12 +166,14 @@
 
               <div class="divider">OR</div>
 
-              <label class="field">
-                <span>Refresh Token</span>
-                <textarea id="refreshTokenInput" rows="4" placeholder="Paste refresh token"></textarea>
-              </label>
-              <button class="ghost full" id="addAccountBtn" type="button">Add via Token</button>
-              <div class="helper">Tokens are stored locally in the accounts folder.</div>
+              <div class="token-box">
+                <label class="field">
+                  <span>Refresh Token</span>
+                  <textarea id="refreshTokenInput" rows="4" placeholder="Paste refresh token"></textarea>
+                </label>
+                <button class="ghost full" id="addAccountBtn" type="button">Add via Token</button>
+                <div class="helper">Tokens are stored locally in the accounts folder.</div>
+              </div>
             </div>
           </div>
         </div>
@@ -380,13 +388,17 @@
             </h2>
             <p class="muted">Accounts with Gemini/Claude averages in one view.</p>
           </div>
+          <div class="section-actions">
+            <button class="secondary" id="refreshAllAccountsBtn" type="button">Refresh All Quotas</button>
+          </div>
         </div>
         <div class="table-head accounts-head">
           <span>Account</span>
           <span>Status</span>
           <span>Tier</span>
-          <span>Gemini Avg</span>
-          <span>Claude Avg</span>
+          <span>Updated</span>
+          <span>Gemini</span>
+          <span>Claude</span>
           <span>Actions</span>
         </div>
         <div id="accountsList" class="table-list"></div>

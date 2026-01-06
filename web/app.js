@@ -17,6 +17,57 @@ const state = {
   },
 };
 
+// ========== 工具函数 ==========
+
+/**
+ * 防抖函数 - 用于减少高频操作的 API 调用
+ * @param {Function} fn - 要防抖的函数
+ * @param {number} delay - 延迟时间（毫秒）
+ * @returns {Function} - 防抖后的函数
+ */
+function debounce(fn, delay) {
+  let timeoutId = null;
+  return function (...args) {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => {
+      fn.apply(this, args);
+      timeoutId = null;
+    }, delay);
+  };
+}
+
+/**
+ * 节流函数 - 用于限制高频操作的执行频率
+ * @param {Function} fn - 要节流的函数
+ * @param {number} limit - 最小间隔时间（毫秒）
+ * @returns {Function} - 节流后的函数
+ */
+function throttle(fn, limit) {
+  let lastCall = 0;
+  let timeoutId = null;
+  return function (...args) {
+    const now = Date.now();
+    const remaining = limit - (now - lastCall);
+
+    if (remaining <= 0) {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      lastCall = now;
+      fn.apply(this, args);
+    } else if (!timeoutId) {
+      timeoutId = setTimeout(() => {
+        lastCall = Date.now();
+        timeoutId = null;
+        fn.apply(this, args);
+      }, remaining);
+    }
+  };
+}
+
 const elements = {
   apiKeyInput: document.getElementById("apiKeyInput"),
   saveKeyBtn: document.getElementById("saveKeyBtn"),
@@ -26,6 +77,7 @@ const elements = {
   currentAccountBody: document.getElementById("currentAccountBody"),
   accountsList: document.getElementById("accountsList"),
   refreshAllBtn: document.getElementById("refreshAllBtn"),
+  refreshAllAccountsBtn: document.getElementById("refreshAllAccountsBtn"),
   refreshTokenInput: document.getElementById("refreshTokenInput"),
   addAccountBtn: document.getElementById("addAccountBtn"),
   toast: document.getElementById("toast"),
@@ -104,8 +156,11 @@ let oauthPollTimer = null;
 function updateOAuthUI(status, message, authUrl) {
   state.oauth.status = status || "idle";
   state.oauth.message = message || "";
+  const isSuccess = state.oauth.status === "success";
   if (typeof authUrl === "string") {
-    state.oauth.authUrl = authUrl;
+    state.oauth.authUrl = isSuccess ? "" : authUrl;
+  } else if (isSuccess) {
+    state.oauth.authUrl = "";
   }
   const isLoading = state.oauth.status === "loading";
   const isWaiting = state.oauth.status === "waiting";
@@ -128,15 +183,15 @@ function updateOAuthUI(status, message, authUrl) {
   }
 
   if (elements.oauthLinkBox) {
-    if (state.oauth.authUrl) {
+    if (state.oauth.authUrl && !isSuccess) {
       elements.oauthLinkBox.classList.remove("hidden");
     } else {
       elements.oauthLinkBox.classList.add("hidden");
     }
   }
 
-  if (elements.oauthLinkText && state.oauth.authUrl) {
-    elements.oauthLinkText.textContent = state.oauth.authUrl;
+  if (elements.oauthLinkText) {
+    elements.oauthLinkText.textContent = state.oauth.authUrl || "";
   }
 
   if (elements.oauthOpenBtn) {
@@ -254,6 +309,12 @@ async function apiFetch(path, options = {}) {
     headers,
   });
 
+  // Handle 401 Unauthorized - redirect to login
+  if (response.status === 401) {
+    window.location.href = "/login.html";
+    throw new Error("Authentication required");
+  }
+
   if (!response.ok) {
     const text = await response.text();
     let message = text || response.statusText;
@@ -262,7 +323,7 @@ async function apiFetch(path, options = {}) {
       if (parsed && parsed.error) {
         message = parsed.error;
       }
-    } catch (_) {}
+    } catch (_) { }
     throw new Error(message);
   }
 
@@ -287,6 +348,17 @@ function formatDate(timestamp) {
   return date.toLocaleString();
 }
 
+/**
+ * 根据百分比返回状态颜色类名
+ * @param {number} percentage - 百分比值 (0-100)
+ * @returns {string} - CSS 类名: 'quota-high' (绿), 'quota-medium' (黄), 'quota-low' (红)
+ */
+function getQuotaColorClass(percentage) {
+  if (percentage >= 60) return "quota-high";
+  if (percentage >= 30) return "quota-medium";
+  return "quota-low";
+}
+
 function computeSummary(accounts) {
   const total = accounts.length;
   let geminiAvg = 0;
@@ -297,11 +369,12 @@ function computeSummary(accounts) {
   accounts.forEach((account) => {
     const models = (account.quota && account.quota.models) || [];
     models.forEach((model) => {
-      if (model.name.includes("gemini")) {
+      const name = String(model.name || "").toLowerCase();
+      if (name.includes("gemini")) {
         geminiAvg += model.percentage || 0;
         geminiCount += 1;
       }
-      if (model.name.includes("claude")) {
+      if (name.includes("claude")) {
         claudeAvg += model.percentage || 0;
         claudeCount += 1;
       }
@@ -343,8 +416,9 @@ function computeAccountStats(account) {
 
 function renderMetricCard(label, value, count) {
   const safeValue = Math.max(0, Math.min(100, value || 0));
+  const colorClass = getQuotaColorClass(safeValue);
   return `
-    <div class="metric-card">
+    <div class="metric-card ${colorClass}">
       <span class="metric-title">${escapeHtml(label)}</span>
       <strong>${safeValue}%</strong>
       <div class="progress"><div style="width:${safeValue}%"></div></div>
@@ -357,8 +431,15 @@ function renderTierBadge(tier) {
   if (!tier || tier === "-") {
     return '<span class="badge">Tier: -</span>';
   }
-  if (String(tier).toLowerCase().includes("pro")) {
+  const normalized = String(tier).toLowerCase();
+  if (normalized.includes("ultra")) {
+    return '<span class="badge ultra">ULTRA</span>';
+  }
+  if (normalized.includes("pro")) {
     return '<span class="badge pro">PRO</span>';
+  }
+  if (normalized.includes("free")) {
+    return '<span class="badge free">FREE</span>';
   }
   return `<span class="badge">Tier: ${escapeHtml(tier)}</span>`;
 }
@@ -366,18 +447,21 @@ function renderTierBadge(tier) {
 function renderSummary() {
   const summary = computeSummary(state.accounts);
   const cards = [
-    { title: "Gemini Avg", value: `${summary.avgGemini}%` },
-    { title: "Claude Avg", value: `${summary.avgClaude}%` },
+    { title: "Gemini", value: summary.avgGemini },
+    { title: "Claude", value: summary.avgClaude },
   ];
 
   elements.summaryGrid.innerHTML = cards
     .map(
-      (card, index) => `
-      <div class="summary-card" style="animation-delay:${index * 0.05}s">
+      (card, index) => {
+        const colorClass = getQuotaColorClass(card.value);
+        return `
+      <div class="summary-card ${colorClass}" style="animation-delay:${index * 0.05}s">
         <h3>${escapeHtml(card.title)}</h3>
-        <div class="value">${escapeHtml(card.value)}</div>
+        <div class="value">${card.value}%</div>
       </div>
-    `
+    `;
+      }
     )
     .join("");
 }
@@ -392,19 +476,54 @@ function renderCurrentAccount() {
 
   elements.currentAccountBadge.textContent = current.email || "Account";
   const stats = computeAccountStats(current);
+  const otherAccounts = state.accounts.filter((a) => a.id !== state.currentAccountId);
+  const otherAccountsHtml = otherAccounts.length
+    ? `
+    <div class="other-accounts">
+      <div class="other-accounts-head">
+        <span>Other Accounts</span>
+        <div class="other-accounts-cols">
+          <span>Gemini</span>
+          <span>Claude</span>
+        </div>
+      </div>
+      <div class="other-accounts-list">
+        ${otherAccounts
+          .map((account) => {
+            const accountStats = computeAccountStats(account);
+            const geminiColorClass = getQuotaColorClass(accountStats.geminiAvg);
+            const claudeColorClass = getQuotaColorClass(accountStats.claudeAvg);
+            return `
+              <div class="other-account-item">
+                <div class="other-account-main">
+                  <span class="other-account-email truncate" title="${escapeHtml(account.email)}">${escapeHtml(account.email)}</span>
+                </div>
+                <div class="other-account-meta">
+                  <span class="other-account-pill ${geminiColorClass}">${accountStats.geminiAvg}%</span>
+                  <span class="other-account-pill ${claudeColorClass}">${accountStats.claudeAvg}%</span>
+                </div>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+    `
+    : "";
   elements.currentAccountBody.innerHTML = `
     <div class="card-title">
-      <strong>${escapeHtml(current.email)}</strong>
-      <span class="muted">${escapeHtml(current.name || "Unnamed")}</span>
+      <strong class="truncate" title="${escapeHtml(current.email)}">${escapeHtml(current.email)}</strong>
+      <span class="muted truncate">${escapeHtml(current.name || "Unnamed")}</span>
     </div>
     <div class="badges">
       ${current.quota && current.quota.subscription_tier ? renderTierBadge(current.quota.subscription_tier) : ""}
       ${current.disabled ? '<span class="badge danger">Disabled</span>' : '<span class="badge success">Active</span>'}
     </div>
     <div class="account-metrics">
-      ${renderMetricCard("Gemini Avg", stats.geminiAvg, stats.geminiCount)}
-      ${renderMetricCard("Claude Avg", stats.claudeAvg, stats.claudeCount)}
+      ${renderMetricCard("Gemini", stats.geminiAvg, stats.geminiCount)}
+      ${renderMetricCard("Claude", stats.claudeAvg, stats.claudeCount)}
     </div>
+    ${otherAccountsHtml}
   `;
 }
 
@@ -418,12 +537,15 @@ function renderAccounts() {
     .map((account) => {
       const isCurrent = account.id === state.currentAccountId;
       const tier = account.quota && account.quota.subscription_tier ? account.quota.subscription_tier : "-";
+      const updatedAt = account.quota && account.quota.last_updated ? formatDate(account.quota.last_updated) : "-";
       const stats = computeAccountStats(account);
+      const geminiColorClass = getQuotaColorClass(stats.geminiAvg);
+      const claudeColorClass = getQuotaColorClass(stats.claudeAvg);
       return `
         <div class="table-row">
-          <div class="table-cell">
-            <strong>${escapeHtml(account.email)}</strong>
-            <span class="muted">${escapeHtml(account.name || "Unnamed")}</span>
+          <div class="table-cell" style="overflow:hidden">
+            <strong class="truncate" title="${escapeHtml(account.email)}">${escapeHtml(account.email)}</strong>
+            <span class="muted truncate">${escapeHtml(account.name || "Unnamed")}</span>
           </div>
           <div class="table-cell">
             ${isCurrent ? '<span class="badge success">Current</span>' : ""}
@@ -433,15 +555,18 @@ function renderAccounts() {
             ${renderTierBadge(tier)}
           </div>
           <div class="table-cell">
-            <span class="badge">${stats.geminiAvg}%</span>
+            <span class="muted">${escapeHtml(updatedAt)}</span>
           </div>
           <div class="table-cell">
-            <span class="badge">${stats.claudeAvg}%</span>
+            <span class="badge ${geminiColorClass}">${stats.geminiAvg}%</span>
+          </div>
+          <div class="table-cell">
+            <span class="badge ${claudeColorClass}">${stats.claudeAvg}%</span>
           </div>
           <div class="table-cell table-actions">
-            <button class="secondary" data-action="set-current" data-id="${escapeHtml(account.id)}">Set Current</button>
-            <button class="ghost" data-action="refresh-quota" data-id="${escapeHtml(account.id)}">Refresh</button>
-            <button class="danger" data-action="delete" data-id="${escapeHtml(account.id)}">Delete</button>
+            <button class="secondary small" data-action="set-current" data-id="${escapeHtml(account.id)}">Set</button>
+            <button class="ghost small" data-action="refresh-quota" data-id="${escapeHtml(account.id)}">Refresh</button>
+            <button class="danger small" data-action="delete" data-id="${escapeHtml(account.id)}">Del</button>
           </div>
         </div>
       `;
@@ -656,7 +781,8 @@ async function loadMappings() {
   }
 }
 
-async function saveMappings() {
+// 内部保存函数（直接调用 API）
+async function _saveMappingsImpl() {
   await apiFetch("/api/proxy/mappings", {
     method: "PUT",
     body: JSON.stringify({
@@ -664,6 +790,43 @@ async function saveMappings() {
       openai_mapping: state.mappings.openai,
       custom_mapping: state.mappings.custom,
     }),
+  });
+}
+
+// 保存 Mappings 的状态跟踪
+let _saveMappingsTimer = null;
+let _saveMappingsResolvers = [];
+
+/**
+ * 防抖版本的 saveMappings
+ * 在 300ms 内的多次调用会合并为一次，减少 API 请求
+ * @returns {Promise} - 保存完成的 Promise
+ */
+function saveMappings() {
+  return new Promise((resolve, reject) => {
+    // 保存当前调用的 resolver
+    _saveMappingsResolvers.push({ resolve, reject });
+
+    // 清除之前的定时器（重置防抖）
+    if (_saveMappingsTimer) {
+      clearTimeout(_saveMappingsTimer);
+    }
+
+    // 设置新的定时器
+    _saveMappingsTimer = setTimeout(async () => {
+      const resolvers = _saveMappingsResolvers;
+      _saveMappingsResolvers = [];
+      _saveMappingsTimer = null;
+
+      try {
+        await _saveMappingsImpl();
+        // 所有等待的调用都成功
+        resolvers.forEach(({ resolve }) => resolve());
+      } catch (err) {
+        // 所有等待的调用都失败
+        resolvers.forEach(({ reject }) => reject(err));
+      }
+    }, 300); // 300ms 防抖延迟
   });
 }
 
@@ -819,7 +982,9 @@ async function handleRefreshQuota(accountId) {
 }
 
 async function handleRefreshAll() {
-  elements.refreshAllBtn.disabled = true;
+  // Disable both refresh buttons during the operation
+  if (elements.refreshAllBtn) elements.refreshAllBtn.disabled = true;
+  if (elements.refreshAllAccountsBtn) elements.refreshAllAccountsBtn.disabled = true;
   try {
     await apiFetch("/api/accounts/refresh_quotas", { method: "POST" });
     showToast("All quotas refreshed");
@@ -827,7 +992,8 @@ async function handleRefreshAll() {
   } catch (err) {
     showToast(`Refresh failed: ${err.message}`);
   } finally {
-    elements.refreshAllBtn.disabled = false;
+    if (elements.refreshAllBtn) elements.refreshAllBtn.disabled = false;
+    if (elements.refreshAllAccountsBtn) elements.refreshAllAccountsBtn.disabled = false;
   }
 }
 
@@ -850,6 +1016,9 @@ function bindEvents() {
   });
 
   elements.refreshAllBtn.addEventListener("click", handleRefreshAll);
+  if (elements.refreshAllAccountsBtn) {
+    elements.refreshAllAccountsBtn.addEventListener("click", handleRefreshAll);
+  }
   elements.addAccountBtn.addEventListener("click", handleAddAccount);
   if (elements.oauthStartBtn) {
     elements.oauthStartBtn.addEventListener("click", startOAuthLogin);
@@ -960,12 +1129,39 @@ function bindEvents() {
   });
 }
 
-bindEvents();
-initTabs();
-refreshProtocolCopyTargets();
-renderProtocolCards();
-renderExampleCode();
-loadAccounts();
-loadMappings();
-loadModels();
-fetchOAuthStatus();
+// Check authentication status on page load
+async function checkAuthStatus() {
+  try {
+    const response = await fetch("/api/auth/status");
+    if (!response.ok) {
+      window.location.href = "/login.html";
+      return false;
+    }
+    const data = await response.json();
+    if (!data.authenticated) {
+      window.location.href = "/login.html";
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("Failed to check auth status:", err);
+    window.location.href = "/login.html";
+    return false;
+  }
+}
+
+// Initialize app after auth check
+(async function init() {
+  const isAuthenticated = await checkAuthStatus();
+  if (!isAuthenticated) return;
+
+  bindEvents();
+  initTabs();
+  refreshProtocolCopyTargets();
+  renderProtocolCards();
+  renderExampleCode();
+  loadAccounts();
+  loadMappings();
+  loadModels();
+  fetchOAuthStatus();
+})();

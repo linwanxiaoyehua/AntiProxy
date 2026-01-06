@@ -440,22 +440,24 @@ pub async fn handle_messages(
     debug!("[{}] Full Claude Request JSON: {}", trace_id, serde_json::to_string_pretty(&request).unwrap_or_default());
     debug!("========== [{}] CLAUDE REQUEST DEBUG END ==========", trace_id);
 
-    // 1. 获取 会话 ID (已废弃基于内容的哈希，改用 TokenManager 内部的时间窗口锁定)
-    let _session_id: Option<&str> = None;
-
     // 2. 获取 UpstreamClient
     let upstream = state.upstream.clone();
-    
+
     // 3. 准备闭包
     let mut request_for_body = request.clone();
     let token_manager = state.token_manager;
+
+    // 1. 提前计算 session_id (在循环外部，避免因 request_for_body 被修改导致 session_id 变化)
+    // 这确保同一请求的所有重试都使用相同的账号
+    let stable_session_id = crate::proxy::session_manager::SessionManager::extract_session_id(&request);
     
     let pool_size = token_manager.len();
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
 
     let mut last_error = String::new();
     let mut retried_without_thinking = false;
-    
+    let mut force_rotate_next = false;  // 新增：控制下一次循环是否轮换账号
+
     for attempt in 0..max_attempts {
         // 2. 模型路由与配置解析 (提前解析以确定请求类型)
         // 先不应用家族映射，获取初步的 mapped_model
@@ -493,13 +495,16 @@ pub async fn handle_messages(
             initial_mapped_model
         };
 
-        // 0. 尝试提取 session_id 用于粘性调度 (Phase 2/3)
-        // 使用 SessionManager 生成稳定的会话指纹
-        let session_id_str = crate::proxy::session_manager::SessionManager::extract_session_id(&request_for_body);
-        let session_id = Some(session_id_str.as_str());
+        // 0. 使用预计算的 session_id (在循环外部已计算，确保重试时不会改变)
+        let session_id = Some(stable_session_id.as_str());
 
-        let force_rotate_token = attempt > 0;
-        let (access_token, project_id, email) = match token_manager.get_token(&config.request_type, force_rotate_token, session_id).await {
+        let quota_group = "claude";
+        // 使用 force_rotate_next 而不是 attempt > 0，这样只有在确定需要轮换时才轮换账号
+        let force_rotate_token = force_rotate_next;
+        let selected = match token_manager
+            .get_token(quota_group, &config.request_type, force_rotate_token, session_id)
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 let safe_message = if e.contains("invalid_grant") {
@@ -519,6 +524,11 @@ pub async fn handle_messages(
                 ).into_response();
             }
         };
+
+        let access_token = selected.access_token;
+        let project_id = selected.project_id;
+        let email = selected.email;
+        let account_id = selected.account_id;
 
         info!("✓ Using account: {} (type: {})", email, config.request_type);
         
@@ -712,7 +722,14 @@ pub async fn handle_messages(
         
         // 3. 标记限流状态（用于 UI 显示）
         if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
-            token_manager.mark_rate_limited(&email, status_code, retry_after.as_deref(), &error_text);
+            token_manager.mark_rate_limited(
+                quota_group,
+                &config.request_type,
+                &account_id,
+                status_code,
+                retry_after.as_deref(),
+                &error_text,
+            );
         }
 
         // 4. 处理 400 错误 (Thinking 签名失效)
@@ -769,15 +786,19 @@ pub async fn handle_messages(
         // 5. 统一处理所有可重试错误
         // [REMOVED] 不再特殊处理 QUOTA_EXHAUSTED,允许账号轮换
         // 原逻辑会在第一个账号配额耗尽时直接返回,导致"平衡"模式无法切换账号
-        
-        
+
+
         // 确定重试策略
         let strategy = determine_retry_strategy(status_code, &error_text, retried_without_thinking);
-        
+
         // 执行退避
         if apply_retry_strategy(strategy, attempt, status_code, &trace_id).await {
-            // 判断是否需要轮换账号
-            if !should_rotate_account(status_code) {
+            // 判断是否需要轮换账号，并设置下一次循环的轮换标志
+            if should_rotate_account(status_code) {
+                force_rotate_next = true;
+                debug!("[{}] Will rotate account for status {} (account-level issue)", trace_id, status_code);
+            } else {
+                force_rotate_next = false;
                 debug!("[{}] Keeping same account for status {} (server-side issue)", trace_id, status_code);
             }
             continue;

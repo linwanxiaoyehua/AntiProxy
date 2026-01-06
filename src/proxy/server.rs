@@ -39,6 +39,10 @@ pub struct AppState {
     pub upstream_proxy: Arc<tokio::sync::RwLock<crate::proxy::config::UpstreamProxyConfig>>,
     pub upstream: Arc<crate::proxy::upstream::client::UpstreamClient>,
     pub monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
+    /// WebAuthn (Passkey) 管理器
+    pub webauthn_manager: Arc<crate::modules::webauthn::WebAuthnManager>,
+    /// Session 管理器
+    pub session_manager: Arc<crate::modules::webauthn::SessionManager>,
 }
 
 /// Axum 服务器实例
@@ -107,6 +111,18 @@ impl AxumServer {
             auth_url: None,
         }));
 
+        // 初始化 WebAuthn 管理器
+        let data_dir = crate::modules::account::get_data_dir()
+            .map_err(|e| format!("Failed to get data dir: {}", e))?;
+        let webauthn_manager = Arc::new(crate::modules::webauthn::WebAuthnManager::new(data_dir));
+        webauthn_manager.load_credentials().await
+            .map_err(|e| format!("Failed to load passkeys: {}", e))?;
+        webauthn_manager.load_auth_config().await
+            .map_err(|e| format!("Failed to load auth config: {}", e))?;
+
+        // 初始化 Session 管理器 (7天有效期)
+        let session_manager = Arc::new(crate::modules::webauthn::SessionManager::new(24 * 7));
+
         let state = AppState {
             token_manager: token_manager.clone(),
             anthropic_mapping: mapping_state.clone(),
@@ -123,6 +139,8 @@ impl AxumServer {
                 upstream_proxy.clone(),
             ))),
             monitor: monitor.clone(),
+            webauthn_manager,
+            session_manager,
         };
 
 
@@ -132,6 +150,20 @@ impl AxumServer {
         let static_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("web");
 
         let app = Router::new()
+            // WebAuthn (Passkey) Authentication APIs
+            .route("/api/auth/status", get(handlers::webauthn::get_auth_status))
+            .route("/api/auth/register/start", post(handlers::webauthn::start_registration))
+            .route("/api/auth/register/finish", post(handlers::webauthn::finish_registration))
+            .route("/api/auth/login/start", post(handlers::webauthn::start_authentication))
+            .route("/api/auth/login/finish", post(handlers::webauthn::finish_authentication))
+            .route("/api/auth/logout", post(handlers::webauthn::logout))
+            .route("/api/auth/credentials", get(handlers::webauthn::list_credentials))
+            .route("/api/auth/credentials/delete", post(handlers::webauthn::delete_credential))
+            // Password Authentication APIs
+            .route("/api/auth/password/setup", post(handlers::webauthn::setup_password))
+            .route("/api/auth/password/login", post(handlers::webauthn::password_login))
+            .route("/api/auth/password/change", post(handlers::webauthn::change_password))
+            .route("/api/auth/reset", post(handlers::webauthn::reset_auth))
             // Management APIs
             .route("/api/accounts", get(handlers::manage::list_accounts).post(handlers::manage::create_account))
             .route(
@@ -204,6 +236,7 @@ impl AxumServer {
             .route("/v1/api/event_logging", post(silent_ok_handler))
             .route("/healthz", get(health_check_handler))
             .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
+            .layer(axum::middleware::from_fn_with_state(state.clone(), crate::proxy::middleware::web_auth_middleware))
             .layer(axum::middleware::from_fn_with_state(state.clone(), crate::proxy::middleware::monitor::monitor_middleware))
             .layer(TraceLayer::new_for_http())
             .layer(axum::middleware::from_fn_with_state(

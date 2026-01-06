@@ -1,17 +1,349 @@
 // OpenAI Handler
 use axum::{extract::Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::body::Body;
+use axum::response::Response;
 use base64::Engine as _;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use tracing::{debug, error, info}; // Import Engine trait for encode method
 
 use crate::proxy::mappers::openai::{
     transform_openai_request, transform_openai_response, OpenAIRequest,
 };
-// use crate::proxy::upstream::client::UpstreamClient; // 通过 state 获取
 use crate::proxy::server::AppState;
+use crate::proxy::TokenManager;
+use crate::proxy::upstream::client::UpstreamClient;
 
 const MAX_RETRY_ATTEMPTS: usize = 3;
 use crate::proxy::session_manager::SessionManager;
+
+/// 响应格式类型
+#[derive(Clone, Copy)]
+enum ResponseFormat {
+    /// 标准 OpenAI Chat 格式
+    Chat,
+    /// Legacy Completions 格式
+    LegacyCompletion,
+    /// Codex 风格格式
+    Codex,
+}
+
+/// 核心请求执行结果
+enum ExecuteResult {
+    /// 成功的流式响应
+    StreamResponse(Response),
+    /// 成功的非流式响应 (Gemini 原始 JSON)
+    JsonResponse(Value),
+    /// 需要重试
+    Retry { error: String },
+    /// 不可重试的错误
+    FatalError { status: StatusCode, message: String },
+}
+
+/// 核心请求执行函数 - 消除 handle_chat_completions 和 handle_completions 之间的重复代码
+async fn execute_openai_request(
+    state: &AppState,
+    openai_req: &OpenAIRequest,
+    upstream: Arc<UpstreamClient>,
+    token_manager: Arc<TokenManager>,
+    attempt: usize,
+    max_attempts: usize,
+    response_format: ResponseFormat,
+) -> ExecuteResult {
+    // 1. 模型路由与配置解析
+    let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
+        &openai_req.model,
+        &*state.custom_mapping.read().await,
+        &*state.openai_mapping.read().await,
+        &*state.anthropic_mapping.read().await,
+        false, // OpenAI 请求不应用 Claude 家族映射
+    );
+
+    // 将 OpenAI 工具转为 Value 数组以便探测联网
+    let tools_val: Option<Vec<Value>> = openai_req
+        .tools
+        .as_ref()
+        .map(|list| list.iter().cloned().collect());
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(
+        &openai_req.model,
+        &mapped_model,
+        &tools_val,
+    );
+    let quota_group = if openai_req.model.to_ascii_lowercase().contains("claude")
+        || mapped_model.to_ascii_lowercase().contains("claude")
+    {
+        "claude"
+    } else {
+        "gemini"
+    };
+
+    // 2. 提取 SessionId (粘性指纹)
+    let session_id = SessionManager::extract_openai_session_id(openai_req);
+
+    // 3. 获取 Token
+    let selected = match token_manager
+        .get_token(quota_group, &config.request_type, attempt > 0, Some(&session_id))
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            return ExecuteResult::FatalError {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: format!("Token error: {}", e),
+            };
+        }
+    };
+
+    let access_token = selected.access_token;
+    let project_id = selected.project_id;
+    let email = selected.email;
+    let account_id = selected.account_id;
+
+    info!("✓ Using account: {} (type: {})", email, config.request_type);
+
+    // 4. 转换请求
+    let gemini_body = transform_openai_request(openai_req, &project_id, &mapped_model);
+
+    if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body) {
+        debug!("[OpenAI-Request] Transformed Gemini Body:\n{}", body_json);
+    }
+
+    // 5. 发送请求
+    let is_stream = openai_req.stream;
+    let method = if is_stream {
+        "streamGenerateContent"
+    } else {
+        "generateContent"
+    };
+    let query_string = if is_stream { Some("alt=sse") } else { None };
+
+    let response = match upstream
+        .call_v1_internal(method, &access_token, gemini_body, query_string)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            debug!(
+                "OpenAI Request failed on attempt {}/{}: {}",
+                attempt + 1,
+                max_attempts,
+                e
+            );
+            return ExecuteResult::Retry { error: e };
+        }
+    };
+
+    let status = response.status();
+
+    // 6. 处理成功响应
+    if status.is_success() {
+        if is_stream {
+            let gemini_stream = response.bytes_stream();
+            let model_clone = openai_req.model.clone();
+
+            // 根据响应格式选择不同的 SSE 流转换器
+            let body = match response_format {
+                ResponseFormat::Chat => {
+                    use crate::proxy::mappers::openai::streaming::create_openai_sse_stream;
+                    let stream = create_openai_sse_stream(Box::pin(gemini_stream), model_clone);
+                    Body::from_stream(stream)
+                }
+                ResponseFormat::Codex => {
+                    use crate::proxy::mappers::openai::streaming::create_codex_sse_stream;
+                    let stream = create_codex_sse_stream(Box::pin(gemini_stream), model_clone);
+                    Body::from_stream(stream)
+                }
+                ResponseFormat::LegacyCompletion => {
+                    use crate::proxy::mappers::openai::streaming::create_legacy_sse_stream;
+                    let stream = create_legacy_sse_stream(Box::pin(gemini_stream), model_clone);
+                    Body::from_stream(stream)
+                }
+            };
+
+            let resp = Response::builder()
+                .header("Content-Type", "text/event-stream")
+                .header("Cache-Control", "no-cache")
+                .header("Connection", "keep-alive")
+                .body(body)
+                .unwrap();
+
+            return ExecuteResult::StreamResponse(resp);
+        }
+
+        match response.json().await {
+            Ok(gemini_resp) => return ExecuteResult::JsonResponse(gemini_resp),
+            Err(e) => {
+                return ExecuteResult::FatalError {
+                    status: StatusCode::BAD_GATEWAY,
+                    message: format!("Parse error: {}", e),
+                };
+            }
+        }
+    }
+
+    // 7. 处理错误响应
+    let status_code = status.as_u16();
+    let retry_after = response
+        .headers()
+        .get("Retry-After")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let error_text = response
+        .text()
+        .await
+        .unwrap_or_else(|_| format!("HTTP {}", status_code));
+
+    tracing::error!(
+        "[OpenAI-Upstream] Error Response {}: {}",
+        status_code,
+        error_text
+    );
+
+    // 429/529/503/500 智能处理
+    if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
+        token_manager.mark_rate_limited(
+            quota_group,
+            &config.request_type,
+            &account_id,
+            status_code,
+            retry_after.as_deref(),
+            &error_text,
+        );
+
+        if let Some(delay_ms) = crate::proxy::upstream::retry::parse_retry_delay(&error_text) {
+            let actual_delay = delay_ms.saturating_add(200).min(10_000);
+            tracing::warn!(
+                "OpenAI Upstream {} on {} attempt {}/{}, waiting {}ms then retrying",
+                status_code,
+                email,
+                attempt + 1,
+                max_attempts,
+                actual_delay
+            );
+            tokio::time::sleep(tokio::time::Duration::from_millis(actual_delay)).await;
+            return ExecuteResult::Retry {
+                error: format!("HTTP {}: {}", status_code, error_text),
+            };
+        }
+
+        tracing::warn!(
+            "OpenAI Upstream {} on {} attempt {}/{}, rotating account",
+            status_code,
+            email,
+            attempt + 1,
+            max_attempts
+        );
+        return ExecuteResult::Retry {
+            error: format!("HTTP {}: {}", status_code, error_text),
+        };
+    }
+
+    // 401/403 触发账号轮换
+    if status_code == 403 || status_code == 401 {
+        tracing::warn!(
+            "OpenAI Upstream {} on account {} attempt {}/{}, rotating account",
+            status_code,
+            email,
+            attempt + 1,
+            max_attempts
+        );
+        return ExecuteResult::Retry {
+            error: format!("HTTP {}: {}", status_code, error_text),
+        };
+    }
+
+    // 其他错误不可重试
+    error!(
+        "OpenAI Upstream non-retryable error {} on account {}: {}",
+        status_code, email, error_text
+    );
+    ExecuteResult::FatalError {
+        status,
+        message: error_text,
+    }
+}
+
+/// 执行带重试的请求循环
+async fn execute_with_retry(
+    state: &AppState,
+    openai_req: &OpenAIRequest,
+    response_format: ResponseFormat,
+) -> Result<Response, (StatusCode, String)> {
+    let upstream = state.upstream.clone();
+    let token_manager = state.token_manager.clone();
+    let pool_size = token_manager.len();
+    let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
+
+    let mut last_error = String::new();
+
+    for attempt in 0..max_attempts {
+        match execute_openai_request(
+            state,
+            openai_req,
+            upstream.clone(),
+            token_manager.clone(),
+            attempt,
+            max_attempts,
+            response_format,
+        )
+        .await
+        {
+            ExecuteResult::StreamResponse(resp) => {
+                // 流式响应已经在 execute_openai_request 中根据格式处理了
+                return Ok(resp);
+            }
+            ExecuteResult::JsonResponse(gemini_resp) => {
+                // 非流式响应 - 根据格式转换
+                let response = match response_format {
+                    ResponseFormat::Chat => {
+                        let openai_response = transform_openai_response(&gemini_resp);
+                        Json(openai_response).into_response()
+                    }
+                    ResponseFormat::LegacyCompletion | ResponseFormat::Codex => {
+                        let chat_resp = transform_openai_response(&gemini_resp);
+                        let choices: Vec<_> = chat_resp
+                            .choices
+                            .iter()
+                            .map(|c| {
+                                json!({
+                                    "text": match &c.message.content {
+                                        Some(crate::proxy::mappers::openai::OpenAIContent::String(s)) => s.clone(),
+                                        _ => "".to_string()
+                                    },
+                                    "index": c.index,
+                                    "logprobs": null,
+                                    "finish_reason": c.finish_reason
+                                })
+                            })
+                            .collect();
+
+                        let legacy_resp = json!({
+                            "id": chat_resp.id,
+                            "object": "text_completion",
+                            "created": chat_resp.created,
+                            "model": chat_resp.model,
+                            "choices": choices
+                        });
+                        Json(legacy_resp).into_response()
+                    }
+                };
+                return Ok(response);
+            }
+            ExecuteResult::Retry { error } => {
+                last_error = error;
+                continue;
+            }
+            ExecuteResult::FatalError { status, message } => {
+                return Err((status, message));
+            }
+        }
+    }
+
+    Err((
+        StatusCode::TOO_MANY_REQUESTS,
+        format!("All accounts exhausted. Last error: {}", last_error),
+    ))
+}
 
 pub async fn handle_chat_completions(
     State(state): State<AppState>,
@@ -38,200 +370,8 @@ pub async fn handle_chat_completions(
 
     debug!("Received OpenAI request for model: {}", openai_req.model);
 
-    // 1. 获取 UpstreamClient (Clone handle)
-    let upstream = state.upstream.clone();
-    let token_manager = state.token_manager;
-    let pool_size = token_manager.len();
-    let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
-
-    let mut last_error = String::new();
-
-    for attempt in 0..max_attempts {
-        // 2. 预解析模型路由与配置
-        let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
-            &openai_req.model,
-            &*state.custom_mapping.read().await,
-            &*state.openai_mapping.read().await,
-            &*state.anthropic_mapping.read().await,
-            false,  // OpenAI 请求不应用 Claude 家族映射
-        );
-        // 将 OpenAI 工具转为 Value 数组以便探测联网
-        let tools_val: Option<Vec<Value>> = openai_req
-            .tools
-            .as_ref()
-            .map(|list| list.iter().cloned().collect());
-        let config = crate::proxy::mappers::common_utils::resolve_request_config(
-            &openai_req.model,
-            &mapped_model,
-            &tools_val,
-        );
-
-        // 3. 提取 SessionId (粘性指纹)
-        let session_id = SessionManager::extract_openai_session_id(&openai_req);
-
-        // 4. 获取 Token (使用准确的 request_type)
-        // 关键：在重试尝试 (attempt > 0) 时强制轮换账号
-        let (access_token, project_id, email) = match token_manager
-            .get_token(&config.request_type, attempt > 0, Some(&session_id))
-            .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!("Token error: {}", e),
-                ));
-            }
-        };
-
-        info!("✓ Using account: {} (type: {})", email, config.request_type);
-
-        // 4. 转换请求
-        let gemini_body = transform_openai_request(&openai_req, &project_id, &mapped_model);
-
-        // [New] 打印转换后的报文 (Gemini Body) 供调试
-        if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body) {
-            debug!("[OpenAI-Request] Transformed Gemini Body:\n{}", body_json);
-        }
-
-        // 5. 发送请求
-        let list_response = openai_req.stream;
-        let method = if list_response {
-            "streamGenerateContent"
-        } else {
-            "generateContent"
-        };
-        let query_string = if list_response { Some("alt=sse") } else { None };
-
-        let response = match upstream
-            .call_v1_internal(method, &access_token, gemini_body, query_string)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                last_error = e.clone();
-                debug!(
-                    "OpenAI Request failed on attempt {}/{}: {}",
-                    attempt + 1,
-                    max_attempts,
-                    e
-                );
-                continue;
-            }
-        };
-
-        let status = response.status();
-        if status.is_success() {
-            // 5. 处理流式 vs 非流式
-            if list_response {
-                use crate::proxy::mappers::openai::streaming::create_openai_sse_stream;
-                use axum::body::Body;
-                use axum::response::Response;
-                // Removed redundant StreamExt
-
-                let gemini_stream = response.bytes_stream();
-                let openai_stream =
-                    create_openai_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());
-                let body = Body::from_stream(openai_stream);
-
-                return Ok(Response::builder()
-                    .header("Content-Type", "text/event-stream")
-                    .header("Cache-Control", "no-cache")
-                    .header("Connection", "keep-alive")
-                    .body(body)
-                    .unwrap()
-                    .into_response());
-            }
-
-            let gemini_resp: Value = response
-                .json()
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)))?;
-
-            let openai_response = transform_openai_response(&gemini_resp);
-            return Ok(Json(openai_response).into_response());
-        }
-
-        // 处理特定错误并重试
-        let status_code = status.as_u16();
-        let retry_after = response.headers().get("Retry-After").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
-        let error_text = response.text().await.unwrap_or_else(|_| format!("HTTP {}", status_code));
-        last_error = format!("HTTP {}: {}", status_code, error_text);
-
-        // [New] 打印错误报文日志
-        tracing::error!(
-            "[OpenAI-Upstream] Error Response {}: {}",
-            status_code,
-            error_text
-        );
-
-        // 429/529/503 智能处理
-        if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
-            // 记录限流信息 (全局同步)
-            token_manager.mark_rate_limited(&email, status_code, retry_after.as_deref(), &error_text);
-
-            // 1. 优先尝试解析 RetryInfo (由 Google Cloud 直接下发)
-            if let Some(delay_ms) = crate::proxy::upstream::retry::parse_retry_delay(&error_text) {
-                let actual_delay = delay_ms.saturating_add(200).min(10_000);
-                tracing::warn!(
-                    "OpenAI Upstream {} on {} attempt {}/{}, waiting {}ms then retrying",
-                    status_code,
-                    email,
-                    attempt + 1,
-                    max_attempts,
-                    actual_delay
-                );
-                tokio::time::sleep(tokio::time::Duration::from_millis(actual_delay)).await;
-                continue;
-            }
-
-            // 2. 只有明确包含 "QUOTA_EXHAUSTED" 才停止，避免误判频率提示 (如 "check quota")
-            if error_text.contains("QUOTA_EXHAUSTED") {
-                error!(
-                    "OpenAI Quota exhausted (429) on account {} attempt {}/{}, stopping to protect pool.",
-                    email,
-                    attempt + 1,
-                    max_attempts
-                );
-                return Err((status, error_text));
-            }
-
-            // 3. 其他限流或服务器过载情况，轮换账号
-            tracing::warn!(
-                "OpenAI Upstream {} on {} attempt {}/{}, rotating account",
-                status_code,
-                email,
-                attempt + 1,
-                max_attempts
-            );
-            continue;
-        }
-
-        // 只有 403 (权限/地区限制) 和 401 (认证失效) 触发账号轮换
-        if status_code == 403 || status_code == 401 {
-            tracing::warn!(
-                "OpenAI Upstream {} on account {} attempt {}/{}, rotating account",
-                status_code,
-                email,
-                attempt + 1,
-                max_attempts
-            );
-            continue;
-        }
-
-        // 404 等由于模型配置或路径错误的 HTTP 异常，直接报错，不进行无效轮换
-        error!(
-            "OpenAI Upstream non-retryable error {} on account {}: {}",
-            status_code, email, error_text
-        );
-        return Err((status, error_text));
-    }
-
-    // 所有尝试均失败
-    Err((
-        StatusCode::TOO_MANY_REQUESTS,
-        format!("All accounts exhausted. Last error: {}", last_error),
-    ))
+    // 使用公共执行函数
+    execute_with_retry(&state, &openai_req, ResponseFormat::Chat).await
 }
 
 /// 处理 Legacy Completions API (/v1/completions)
@@ -490,10 +630,7 @@ pub async fn handle_completions(
         }
     }
 
-    // 2. Reuse handle_chat_completions logic (wrapping with custom handler or direct call)
-    // Actually, due to SSE handling differences (Codex uses different event format), we replicate the loop here or abstract it.
-    // For now, let's replicate the core loop but with Codex specific SSE mapping.
-
+    // 2. 解析请求并使用公共执行函数
     let mut openai_req: OpenAIRequest = serde_json::from_value(body.clone())
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
 
@@ -512,145 +649,17 @@ pub async fn handle_completions(
             });
     }
 
-    let upstream = state.upstream.clone();
-    let token_manager = state.token_manager;
-    let pool_size = token_manager.len();
-    let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
+    debug!("Received Completions request for model: {}", openai_req.model);
 
-    let mut last_error = String::new();
+    // 根据请求类型选择响应格式
+    let response_format = if is_codex_style {
+        ResponseFormat::Codex
+    } else {
+        ResponseFormat::LegacyCompletion
+    };
 
-    for _attempt in 0..max_attempts {
-        let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
-            &openai_req.model,
-            &*state.custom_mapping.read().await,
-            &*state.openai_mapping.read().await,
-            &*state.anthropic_mapping.read().await,
-            false,  // OpenAI 请求不应用 Claude 家族映射
-        );
-        // 将 OpenAI 工具转为 Value 数组以便探测联网
-        let tools_val: Option<Vec<Value>> = openai_req
-            .tools
-            .as_ref()
-            .map(|list| list.iter().cloned().collect());
-        let config = crate::proxy::mappers::common_utils::resolve_request_config(
-            &openai_req.model,
-            &mapped_model,
-            &tools_val,
-        );
-
-        let (access_token, project_id, email) =
-            match token_manager.get_token(&config.request_type, false, None).await {
-                Ok(t) => t,
-                Err(e) => {
-                    return Err((
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        format!("Token error: {}", e),
-                    ))
-                }
-            };
-
-        info!("✓ Using account: {} (type: {})", email, config.request_type);
-
-        let gemini_body = transform_openai_request(&openai_req, &project_id, &mapped_model);
-
-        // [New] 打印转换后的报文 (Gemini Body) 供调试 (Codex 路径)
-        if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body) {
-            debug!("[Codex-Request] Transformed Gemini Body:\n{}", body_json);
-        }
-
-        let list_response = openai_req.stream;
-        let method = if list_response {
-            "streamGenerateContent"
-        } else {
-            "generateContent"
-        };
-        let query_string = if list_response { Some("alt=sse") } else { None };
-
-        let response = match upstream
-            .call_v1_internal(method, &access_token, gemini_body, query_string)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                last_error = e.clone();
-                continue;
-            }
-        };
-
-        let status = response.status();
-        if status.is_success() {
-            if list_response {
-                use axum::body::Body;
-                use axum::response::Response;
-
-                let gemini_stream = response.bytes_stream();
-                let body = if is_codex_style {
-                    use crate::proxy::mappers::openai::streaming::create_codex_sse_stream;
-                    let s =
-                        create_codex_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());
-                    Body::from_stream(s)
-                } else {
-                    use crate::proxy::mappers::openai::streaming::create_legacy_sse_stream;
-                    let s =
-                        create_legacy_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());
-                    Body::from_stream(s)
-                };
-
-                return Ok(Response::builder()
-                    .header("Content-Type", "text/event-stream")
-                    .header("Cache-Control", "no-cache")
-                    .header("Connection", "keep-alive")
-                    .body(body)
-                    .unwrap()
-                    .into_response());
-            }
-
-            let gemini_resp: Value = response
-                .json()
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)))?;
-
-            let chat_resp = transform_openai_response(&gemini_resp);
-
-            // Map Chat Response -> Legacy Completions Response
-            let choices = chat_resp.choices.iter().map(|c| {
-                json!({
-                    "text": match &c.message.content {
-                        Some(crate::proxy::mappers::openai::OpenAIContent::String(s)) => s.clone(),
-                        _ => "".to_string()
-                    },
-                    "index": c.index,
-                    "logprobs": null,
-                    "finish_reason": c.finish_reason
-                })
-            }).collect::<Vec<_>>();
-
-            let legacy_resp = json!({
-                "id": chat_resp.id,
-                "object": "text_completion",
-                "created": chat_resp.created,
-                "model": chat_resp.model,
-                "choices": choices
-            });
-
-            return Ok(axum::Json(legacy_resp).into_response());
-        }
-
-        // Handle errors and retry
-        let status_code = status.as_u16();
-        let error_text = response.text().await.unwrap_or_default();
-        last_error = format!("HTTP {}: {}", status_code, error_text);
-
-        if status_code == 429 || status_code == 403 || status_code == 401 {
-            continue;
-        }
-        return Err((status, error_text));
-    }
-
-    Err((
-        StatusCode::TOO_MANY_REQUESTS,
-        format!("All attempts failed. Last error: {}", last_error),
-    ))
+    // 使用公共执行函数
+    execute_with_retry(&state, &openai_req, response_format).await
 }
 
 pub async fn handle_list_models(State(state): State<AppState>) -> impl IntoResponse {
@@ -750,7 +759,9 @@ pub async fn handle_images_generations(
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager;
 
-    let (access_token, project_id, email) = match token_manager.get_token("image_gen", false, None).await
+    let selected = match token_manager
+        .get_token("gemini", "image_gen", false, None)
+        .await
     {
         Ok(t) => t,
         Err(e) => {
@@ -760,6 +771,10 @@ pub async fn handle_images_generations(
             ))
         }
     };
+
+    let access_token = selected.access_token;
+    let project_id = selected.project_id;
+    let email = selected.email;
 
     info!("✓ Using account: {} for image generation", email);
 
@@ -1000,7 +1015,9 @@ pub async fn handle_images_edits(
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager;
     // Fix: Proper get_token call with correct signature and unwrap (using image_gen quota)
-    let (access_token, project_id, _email) = match token_manager.get_token("image_gen", false, None).await
+    let selected = match token_manager
+        .get_token("gemini", "image_gen", false, None)
+        .await
     {
         Ok(t) => t,
         Err(e) => {
@@ -1010,6 +1027,8 @@ pub async fn handle_images_edits(
             ))
         }
     };
+    let access_token = selected.access_token;
+    let project_id = selected.project_id;
 
     // 2. 映射配置
     let mut contents_parts = Vec::new();

@@ -35,3 +35,11 @@ bytes = "1.5"
 tracing-appender = "0.2.4"
 tracing-log = "0.2.0"
 sha2 = "0.10"
+# WebAuthn (Passkey) support
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
+webauthn-rs-proto = "0.5"
+axum-extra = { version = "0.9", features = ["cookie"] }
+tower-cookies = "0.10"
+time = "0.3"
+# Password hashing
+argon2 = "0.5"

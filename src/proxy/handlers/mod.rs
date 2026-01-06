@@ -6,3 +6,4 @@ pub mod openai;
 pub mod gemini;
 pub mod common;
 pub mod manage;
+pub mod webauthn;

@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AntiProxy - Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #030712;
+            --card-bg: rgba(30, 41, 59, 0.4);
+            --card-border: rgba(148, 163, 184, 0.1);
+            --primary: #38bdf8;
+            --primary-glow: #0ea5e9;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --danger: #f87171;
+            --success: #34d399;
+            --radius-md: 16px;
+            --font-sans: 'Inter', sans-serif;
+            --font-display: 'Outfit', sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--bg-deep);
+            background-image:
+                radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 0% 100%, rgba(129, 140, 248, 0.1) 0%, transparent 30%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 420px;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .logo h1 {
+            font-family: var(--font-display);
+            font-size: 32px;
+            font-weight: 700;
+            background: linear-gradient(to right, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        .logo p {
+            color: var(--text-muted);
+            font-size: 15px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-md);
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .card h2 {
+            font-family: var(--font-display);
+            font-size: 20px;
+            margin-bottom: 24px;
+            text-align: center;
+            color: #fff;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(3, 7, 18, 0.6);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: #fff;
+            font-family: var(--font-sans);
+            font-size: 15px;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .form-group input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 99px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-family: var(--font-sans);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(56, 189, 248, 0.25);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px rgba(56, 189, 248, 0.35);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--card-border);
+            color: var(--text-muted);
+            margin-top: 16px;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .btn:disabled {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        .btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+            line-height: 1.5;
+        }
+
+        .message.error {
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.2);
+            color: var(--danger);
+            display: block;
+        }
+
+        .message.success {
+            background: rgba(52, 211, 153, 0.1);
+            border: 1px solid rgba(52, 211, 153, 0.2);
+            color: var(--success);
+            display: block;
+        }
+
+        .passkey-icon, .password-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 24px;
+            display: block;
+            color: var(--primary);
+            filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.4));
+        }
+
+        .view {
+            display: none;
+        }
+
+        .view.active {
+            display: block;
+        }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .hint {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 24px;
+            text-align: center;
+        }
+
+        .auth-choice {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .auth-choice-btn {
+            flex: 1;
+            padding: 20px 16px;
+            background: rgba(3, 7, 18, 0.4);
+            border: 2px solid var(--card-border);
+            border-radius: 12px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+            color: var(--text-main);
+        }
+
+        .auth-choice-btn:hover {
+            border-color: var(--primary);
+            background: rgba(56, 189, 248, 0.05);
+        }
+
+        .auth-choice-btn.selected {
+            border-color: var(--primary);
+            background: rgba(56, 189, 248, 0.1);
+        }
+
+        .auth-choice-btn svg {
+            width: 36px;
+            height: 36px;
+            margin-bottom: 8px;
+            color: var(--primary);
+        }
+
+        .auth-choice-btn .title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            font-size: 15px;
+        }
+
+        .auth-choice-btn .desc {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .setup-form {
+            display: none;
+        }
+
+        .setup-form.active {
+            display: block;
+        }
+
+        .desc-text {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>AntiProxy</h1>
+            <p>Secure Access</p>
+        </div>
+
+        <div class="card">
+            <!-- Loading State -->
+            <div id="loadingView" class="view active">
+                <div class="spinner"></div>
+                <p style="text-align: center;">Checking authentication...</p>
+            </div>
+
+            <!-- Unsupported Browser (for Passkey) -->
+            <div id="unsupportedView" class="view">
+                <h2 style="color: var(--danger);">Browser Not Supported</h2>
+                <p class="desc-text">Your browser does not support Passkeys. Please use password authentication or switch to a modern browser.</p>
+                <button class="btn btn-primary" onclick="selectAuthMethod('password'); showView('setupChoiceView');">
+                    Use Password Instead
+                </button>
+            </div>
+
+            <!-- Setup Choice View (First Time) -->
+            <div id="setupChoiceView" class="view">
+                <h2>Setup Authentication</h2>
+                <p class="desc-text">
+                    Choose how you want to secure your dashboard. You can only use one method.
+                </p>
+
+                <div class="auth-choice">
+                    <button class="auth-choice-btn" onclick="selectAuthMethod('passkey')" id="passkeyChoice">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+                        </svg>
+                        <div class="title">Passkey</div>
+                        <div class="desc">Biometric / Device PIN</div>
+                    </button>
+                    <button class="auth-choice-btn" onclick="selectAuthMethod('password')" id="passwordChoice">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+                        </svg>
+                        <div class="title">Password</div>
+                        <div class="desc">Traditional login</div>
+                    </button>
+                </div>
+
+                <!-- Passkey Setup Form -->
+                <div id="passkeySetupForm" class="setup-form">
+                    <div id="setupMessage" class="message"></div>
+                    <div class="form-group">
+                        <label for="deviceName">Device Name</label>
+                        <input type="text" id="deviceName" placeholder="e.g., MacBook Pro" autocomplete="off">
+                    </div>
+                    <button id="setupPasskeyBtn" class="btn btn-primary" onclick="startSetupPasskey()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+                        </svg>
+                        Create Passkey
+                    </button>
+                </div>
+
+                <!-- Password Setup Form -->
+                <div id="passwordSetupForm" class="setup-form">
+                    <div id="passwordSetupMessage" class="message"></div>
+                    <div class="form-group">
+                        <label for="newPassword">Password</label>
+                        <input type="password" id="newPassword" placeholder="At least 6 characters" autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmPassword">Confirm Password</label>
+                        <input type="password" id="confirmPassword" placeholder="Confirm your password" autocomplete="new-password">
+                    </div>
+                    <button id="setupPasswordBtn" class="btn btn-primary" onclick="setupPassword()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+                        </svg>
+                        Set Password
+                    </button>
+                </div>
+            </div>
+
+            <!-- Passkey Login View -->
+            <div id="passkeyLoginView" class="view">
+                <svg class="passkey-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+                </svg>
+                <h2>Welcome Back</h2>
+
+                <div id="passkeyLoginMessage" class="message"></div>
+
+                <button id="passkeyLoginBtn" class="btn btn-primary" onclick="startPasskeyLogin()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+                    </svg>
+                    Login with Passkey
+                </button>
+
+                <button class="btn btn-secondary" onclick="showAddDevice()">
+                    Add Another Device
+                </button>
+
+                <p class="hint">
+                    Use your fingerprint, face, or device PIN to authenticate.
+                </p>
+            </div>
+
+            <!-- Password Login View -->
+            <div id="passwordLoginView" class="view">
+                <svg class="password-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+                </svg>
+                <h2>Welcome Back</h2>
+
+                <div id="passwordLoginMessage" class="message"></div>
+
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" placeholder="Enter your password" autocomplete="current-password" onkeydown="if(event.key==='Enter')passwordLogin()">
+                </div>
+
+                <button id="passwordLoginBtn" class="btn btn-primary" onclick="passwordLogin()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+                    </svg>
+                    Login
+                </button>
+
+                <p class="hint">
+                    Enter your password to access the dashboard.
+                </p>
+            </div>
+
+            <!-- Add Passkey View -->
+            <div id="addPasskeyView" class="view">
+                <svg class="passkey-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M15 7a4 4 0 11-8 0 4 4 0 018 0zM6.5 21v-3.5a3.5 3.5 0 017 0V21M17.5 14l2 2m0 0l2 2m-2-2l-2 2m2-2l2-2"/>
+                </svg>
+                <h2>Add Passkey</h2>
+
+                <div id="addPasskeyMessage" class="message"></div>
+
+                <div class="form-group">
+                    <label for="addDeviceName">Device Name</label>
+                    <input type="text" id="addDeviceName" placeholder="e.g., MacBook Pro" autocomplete="off">
+                </div>
+
+                <button id="addPasskeyBtn" class="btn btn-primary" onclick="addPasskey()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 4.5v15m7.5-7.5h-15"/>
+                    </svg>
+                    Add Passkey
+                </button>
+
+                <button class="btn btn-secondary" onclick="showView('passkeyLoginView')">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedAuthMethod = null;
+
+        // Check WebAuthn support
+        function isWebAuthnSupported() {
+            return window.PublicKeyCredential !== undefined &&
+                   typeof window.PublicKeyCredential === 'function';
+        }
+
+        // Base64URL encode/decode helpers
+        function base64UrlEncode(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let str = '';
+            for (const byte of bytes) {
+                str += String.fromCharCode(byte);
+            }
+            return btoa(str)
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=/g, '');
+        }
+
+        function base64UrlDecode(str) {
+            str = str.replace(/-/g, '+').replace(/_/g, '/');
+            while (str.length % 4) {
+                str += '=';
+            }
+            const binaryStr = atob(str);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Show message
+        function showMessage(elementId, message, isError = true) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            el.textContent = message;
+            el.className = 'message ' + (isError ? 'error' : 'success');
+        }
+
+        // Clear message
+        function clearMessage(elementId) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            el.className = 'message';
+        }
+
+        // Show view
+        function showView(viewId) {
+            document.querySelectorAll('.view').forEach(el => {
+                el.classList.remove('active');
+            });
+            document.getElementById(viewId).classList.add('active');
+        }
+
+        // Select auth method
+        function selectAuthMethod(method) {
+            selectedAuthMethod = method;
+
+            document.querySelectorAll('.auth-choice-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            document.querySelectorAll('.setup-form').forEach(form => {
+                form.classList.remove('active');
+            });
+
+            if (method === 'passkey') {
+                document.getElementById('passkeyChoice').classList.add('selected');
+                document.getElementById('passkeySetupForm').classList.add('active');
+            } else {
+                document.getElementById('passwordChoice').classList.add('selected');
+                document.getElementById('passwordSetupForm').classList.add('active');
+            }
+        }
+
+        // Check auth status
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch('/api/auth/status');
+                const data = await response.json();
+
+                if (data.authenticated) {
+                    window.location.href = '/';
+                    return;
+                }
+
+                if (data.needs_setup) {
+                    if (!isWebAuthnSupported()) {
+                        // Auto-select password if passkey not supported
+                        selectAuthMethod('password');
+                        showView('setupChoiceView');
+                    } else {
+                        showView('setupChoiceView');
+                    }
+                } else if (data.auth_mode === 'passkey') {
+                    if (!isWebAuthnSupported()) {
+                        showView('unsupportedView');
+                    } else {
+                        showView('passkeyLoginView');
+                    }
+                } else if (data.auth_mode === 'password') {
+                    showView('passwordLoginView');
+                } else {
+                    showView('setupChoiceView');
+                }
+            } catch (err) {
+                console.error('Failed to check auth status:', err);
+                showView('setupChoiceView');
+            }
+        }
+
+        // Setup password
+        async function setupPassword() {
+            const password = document.getElementById('newPassword').value;
+            const confirm = document.getElementById('confirmPassword').value;
+            const btn = document.getElementById('setupPasswordBtn');
+
+            clearMessage('passwordSetupMessage');
+
+            if (password.length < 6) {
+                showMessage('passwordSetupMessage', 'Password must be at least 6 characters');
+                return;
+            }
+
+            if (password !== confirm) {
+                showMessage('passwordSetupMessage', 'Passwords do not match');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;margin:0;border-width:2px"></div> Setting up...';
+
+            try {
+                const response = await fetch('/api/auth/password/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to setup password');
+                }
+
+                showMessage('passwordSetupMessage', 'Password set successfully! Logging in...', false);
+
+                // Auto-login
+                setTimeout(() => {
+                    document.getElementById('loginPassword').value = password;
+                    passwordLogin();
+                }, 500);
+
+            } catch (err) {
+                showMessage('passwordSetupMessage', err.message);
+                btn.disabled = false;
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg> Set Password';
+            }
+        }
+
+        // Password login
+        async function passwordLogin() {
+            const passwordInput = document.getElementById('loginPassword') || document.getElementById('newPassword');
+            const password = passwordInput?.value;
+            const btn = document.getElementById('passwordLoginBtn');
+
+            if (!password) {
+                showMessage('passwordLoginMessage', 'Please enter your password');
+                return;
+            }
+
+            clearMessage('passwordLoginMessage');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;margin:0;border-width:2px"></div> Logging in...';
+            }
+
+            try {
+                const response = await fetch('/api/auth/password/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Invalid password');
+                }
+
+                showMessage('passwordLoginMessage', 'Login successful! Redirecting...', false);
+
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 500);
+
+            } catch (err) {
+                showMessage('passwordLoginMessage', err.message);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg> Login';
+                }
+            }
+        }
+
+        // Start setup passkey
+        async function startSetupPasskey() {
+            const deviceName = document.getElementById('deviceName').value.trim() || 'Default Device';
+            const btn = document.getElementById('setupPasskeyBtn');
+
+            clearMessage('setupMessage');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;margin:0;border-width:2px"></div> Creating...';
+
+            try {
+                const startResponse = await fetch('/api/auth/register/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: deviceName })
+                });
+
+                if (!startResponse.ok) {
+                    const err = await startResponse.json();
+                    throw new Error(err.error || 'Failed to start registration');
+                }
+
+                const { challenge, options } = await startResponse.json();
+
+                options.publicKey.challenge = base64UrlDecode(options.publicKey.challenge);
+                options.publicKey.user.id = base64UrlDecode(options.publicKey.user.id);
+
+                if (options.publicKey.excludeCredentials) {
+                    options.publicKey.excludeCredentials = options.publicKey.excludeCredentials.map(cred => ({
+                        ...cred,
+                        id: base64UrlDecode(cred.id)
+                    }));
+                }
+
+                const credential = await navigator.credentials.create({
+                    publicKey: options.publicKey
+                });
+
+                const credentialResponse = {
+                    id: credential.id,
+                    rawId: base64UrlEncode(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        clientDataJSON: base64UrlEncode(credential.response.clientDataJSON),
+                        attestationObject: base64UrlEncode(credential.response.attestationObject)
+                    }
+                };
+
+                const finishResponse = await fetch('/api/auth/register/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        challenge,
+                        name: deviceName,
+                        response: credentialResponse
+                    })
+                });
+
+                if (!finishResponse.ok) {
+                    const err = await finishResponse.json();
+                    throw new Error(err.error || 'Failed to complete registration');
+                }
+
+                showMessage('setupMessage', 'Passkey created successfully! Logging in...', false);
+
+                setTimeout(() => startPasskeyLogin(), 1000);
+
+            } catch (err) {
+                console.error('Setup failed:', err);
+                showMessage('setupMessage', err.message || 'Setup failed. Please try again.');
+                btn.disabled = false;
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg> Create Passkey';
+            }
+        }
+
+        // Passkey login
+        async function startPasskeyLogin() {
+            const btn = document.getElementById('passkeyLoginBtn');
+
+            clearMessage('passkeyLoginMessage');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;margin:0;border-width:2px"></div> Authenticating...';
+            }
+
+            try {
+                const startResponse = await fetch('/api/auth/login/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!startResponse.ok) {
+                    const err = await startResponse.json();
+                    throw new Error(err.error || 'Failed to start login');
+                }
+
+                const { challenge, options } = await startResponse.json();
+
+                options.publicKey.challenge = base64UrlDecode(options.publicKey.challenge);
+
+                if (options.publicKey.allowCredentials) {
+                    options.publicKey.allowCredentials = options.publicKey.allowCredentials.map(cred => ({
+                        ...cred,
+                        id: base64UrlDecode(cred.id)
+                    }));
+                }
+
+                const credential = await navigator.credentials.get({
+                    publicKey: options.publicKey
+                });
+
+                const credentialResponse = {
+                    id: credential.id,
+                    rawId: base64UrlEncode(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        clientDataJSON: base64UrlEncode(credential.response.clientDataJSON),
+                        authenticatorData: base64UrlEncode(credential.response.authenticatorData),
+                        signature: base64UrlEncode(credential.response.signature),
+                        userHandle: credential.response.userHandle ? base64UrlEncode(credential.response.userHandle) : null
+                    }
+                };
+
+                const finishResponse = await fetch('/api/auth/login/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        challenge,
+                        response: credentialResponse
+                    })
+                });
+
+                if (!finishResponse.ok) {
+                    const err = await finishResponse.json();
+                    throw new Error(err.error || 'Authentication failed');
+                }
+
+                showMessage('passkeyLoginMessage', 'Login successful! Redirecting...', false);
+
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 500);
+
+            } catch (err) {
+                console.error('Login failed:', err);
+                showMessage('passkeyLoginMessage', err.message || 'Login failed. Please try again.');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg> Login with Passkey';
+                }
+            }
+        }
+
+        // Show add device form
+        function showAddDevice() {
+            showView('addPasskeyView');
+            document.getElementById('addDeviceName').value = '';
+        }
+
+        // Add passkey
+        async function addPasskey() {
+            const deviceName = document.getElementById('addDeviceName').value.trim() || 'New Device';
+            const btn = document.getElementById('addPasskeyBtn');
+
+            clearMessage('addPasskeyMessage');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;margin:0;border-width:2px"></div> Adding...';
+
+            try {
+                const startResponse = await fetch('/api/auth/register/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: deviceName })
+                });
+
+                if (!startResponse.ok) {
+                    const err = await startResponse.json();
+                    throw new Error(err.error || 'Failed to start registration');
+                }
+
+                const { challenge, options } = await startResponse.json();
+
+                options.publicKey.challenge = base64UrlDecode(options.publicKey.challenge);
+                options.publicKey.user.id = base64UrlDecode(options.publicKey.user.id);
+
+                if (options.publicKey.excludeCredentials) {
+                    options.publicKey.excludeCredentials = options.publicKey.excludeCredentials.map(cred => ({
+                        ...cred,
+                        id: base64UrlDecode(cred.id)
+                    }));
+                }
+
+                const credential = await navigator.credentials.create({
+                    publicKey: options.publicKey
+                });
+
+                const credentialResponse = {
+                    id: credential.id,
+                    rawId: base64UrlEncode(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        clientDataJSON: base64UrlEncode(credential.response.clientDataJSON),
+                        attestationObject: base64UrlEncode(credential.response.attestationObject)
+                    }
+                };
+
+                const finishResponse = await fetch('/api/auth/register/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        challenge,
+                        name: deviceName,
+                        response: credentialResponse
+                    })
+                });
+
+                if (!finishResponse.ok) {
+                    const err = await finishResponse.json();
+                    throw new Error(err.error || 'Failed to add passkey');
+                }
+
+                showMessage('addPasskeyMessage', 'Passkey added successfully!', false);
+                setTimeout(() => showView('passkeyLoginView'), 1000);
+
+            } catch (err) {
+                console.error('Add passkey failed:', err);
+                showMessage('addPasskeyMessage', err.message || 'Failed to add passkey.');
+                btn.disabled = false;
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4.5v15m7.5-7.5h-15"/></svg> Add Passkey';
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', checkAuthStatus);
+    </script>
+</body>
+
+</html>
