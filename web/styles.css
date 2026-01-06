@@ -30,6 +30,9 @@ body {
     radial-gradient(circle at 85% 10%, #1f2b44 0%, transparent 40%),
     linear-gradient(145deg, #0b1118, #0d141d 45%, #0d1219 100%);
   min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
 }
 
 .bg-orbit {
@@ -305,6 +308,7 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
+  align-items: start;
 }
 
 .panel {
@@ -313,6 +317,7 @@ body {
   background: linear-gradient(135deg, rgba(22, 31, 43, 0.95), rgba(22, 31, 43, 0.75));
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
+  min-width: 0;
 }
 
 .panel-head {
@@ -387,6 +392,8 @@ body {
   border-radius: 12px;
   border: 1px dashed var(--border);
   background: rgba(9, 13, 19, 0.55);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .hidden {
@@ -394,6 +401,7 @@ body {
 }
 
 .oauth-link code {
+  display: block;
   font-size: 11px;
   color: var(--muted);
   overflow: hidden;
@@ -401,6 +409,7 @@ body {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  max-width: 100%;
 }
 
 .oauth-status.success {
