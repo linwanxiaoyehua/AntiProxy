@@ -24,7 +24,7 @@ docker run --rm -p 8045:8045 \
   -e ANTI_PROXY_BIND=0.0.0.0 \
   -e ANTI_PROXY_ALLOW_LAN=1 \
   -v antiproxy-data:/root/.AntiProxy \
-  linwanxiaoyehua/antiproxy:v0.1.0
+  linwanxiaoyehua/antiproxy:latest
 ```
 
 Then open the web console: `http://localhost:8045`
