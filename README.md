@@ -42,6 +42,21 @@ Environment overrides:
 ## Notes
 - If auth is enabled, send the API key via `Authorization: Bearer <key>` or `x-api-key`.
 
+
+## Example usage for Claude Code
+Once you log into the proxy, with your Google Account. Head to your claude settings.json
+And create a custom env block like so 
+```
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:8045",
+    "ANTHROPIC_API_KEY": "your-api-key-here",
+    "ANTHROPIC_MODEL": "claude-opus-4.5-thinking"
+  }
+}
+```
+Then save the file and start claude code from your compatible client.
+
 ## Credits
 Portions of this project are derived from
 [`Antigravity-Manager`](https://github.com/lbjlaq/Antigravity-Manager) by lbjlaq.
