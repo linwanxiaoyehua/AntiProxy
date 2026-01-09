@@ -13,7 +13,8 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info};
 
 use crate::proxy::mappers::claude::{
-    transform_claude_request_in, transform_response, create_claude_sse_stream, ClaudeRequest,
+    collect_claude_sse_response, create_claude_sse_stream, transform_claude_request_in,
+    transform_response, ClaudeRequest,
 };
 use crate::proxy::session_manager::SessionManager;
 use crate::proxy::server::AppState;
@@ -619,9 +620,8 @@ pub async fn handle_messages(
         };
         
     // 4. 上游调用
-    let is_stream = request.stream;
-    let method = if is_stream { "streamGenerateContent" } else { "generateContent" };
-    let query = if is_stream { Some("alt=sse") } else { None };
+    let method = "streamGenerateContent";
+    let query = Some("alt=sse");
 
     let response = match upstream.call_v1_internal(
         method,
@@ -663,35 +663,21 @@ pub async fn handle_messages(
                     .body(Body::from_stream(sse_stream))
                     .unwrap();
             } else {
-                // 处理非流式响应
-                let bytes = match response.bytes().await {
-                    Ok(b) => b,
-                    Err(e) => return (StatusCode::BAD_GATEWAY, format!("Failed to read body: {}", e)).into_response(),
-                };
-                
-                // Debug print
-                if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                    debug!("Upstream Response for Claude request: {}", text);
-                }
-
-                let gemini_resp: Value = match serde_json::from_slice(&bytes) {
-                    Ok(v) => v,
-                    Err(e) => return (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)).into_response(),
-                };
-
-                // 解包 response 字段（v1internal 格式）
-                let raw = gemini_resp.get("response").unwrap_or(&gemini_resp);
-
-                // 转换为 Gemini Response 结构
-                let gemini_response: crate::proxy::mappers::claude::models::GeminiResponse = match serde_json::from_value(raw.clone()) {
+                let stream = response.bytes_stream();
+                let gemini_response = match collect_claude_sse_response(Box::pin(stream)).await {
                     Ok(r) => r,
-                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Convert error: {}", e)).into_response(),
+                    Err(e) => {
+                        return (StatusCode::BAD_GATEWAY, format!("Stream collect error: {}", e))
+                            .into_response();
+                    }
                 };
-                
-                // 转换
+
                 let claude_response = match transform_response(&gemini_response) {
                     Ok(r) => r,
-                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Transform error: {}", e)).into_response(),
+                    Err(e) => {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Transform error: {}", e))
+                            .into_response();
+                    }
                 };
 
                 // [Optimization] 记录闭环日志：消耗情况
@@ -700,12 +686,12 @@ pub async fn handle_messages(
                 } else {
                     String::new()
                 };
-                
+
                 tracing::info!(
-                    "[{}] Request finished. Model: {}, Tokens: In {}, Out {}{}", 
-                    trace_id, 
-                    request_with_mapped.model, 
-                    claude_response.usage.input_tokens, 
+                    "[{}] ✓ Stream collected and converted to JSON | Model: {}, Tokens: In {}, Out {}{}",
+                    trace_id,
+                    request_with_mapped.model,
+                    claude_response.usage.input_tokens,
                     claude_response.usage.output_tokens,
                     cache_info
                 );

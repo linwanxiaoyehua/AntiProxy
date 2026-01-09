@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info}; // Import Engine trait for encode method
 
 use crate::proxy::mappers::openai::{
-    transform_openai_request, transform_openai_response, OpenAIRequest,
+    collect_openai_sse_response, transform_openai_request, transform_openai_response, OpenAIRequest,
 };
 use crate::proxy::server::AppState;
 use crate::proxy::TokenManager;
@@ -38,6 +38,20 @@ enum ExecuteResult {
     Retry { error: String, should_rotate: bool },
     /// 不可重试的错误
     FatalError { status: StatusCode, message: String },
+}
+
+fn extract_u32(value: &Value, path: &[&str]) -> u32 {
+    let mut current = value;
+    for key in path {
+        current = match current.get(*key) {
+            Some(v) => v,
+            None => return 0,
+        };
+    }
+    current
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(0)
 }
 
 /// 核心请求执行函数 V2 - 接受预计算的 session_id 和 force_rotate 参数
@@ -107,13 +121,8 @@ async fn execute_openai_request_v2(
     }
 
     // 4. 发送请求
-    let is_stream = openai_req.stream;
-    let method = if is_stream {
-        "streamGenerateContent"
-    } else {
-        "generateContent"
-    };
-    let query_string = if is_stream { Some("alt=sse") } else { None };
+    let method = "streamGenerateContent";
+    let query_string = Some("alt=sse");
 
     let response = match upstream
         .call_v1_internal(method, &access_token, gemini_body, query_string)
@@ -131,11 +140,11 @@ async fn execute_openai_request_v2(
 
     // 5. 处理成功响应
     if status.is_success() {
-        if is_stream {
-            let gemini_stream = response.bytes_stream();
-            let model_clone = openai_req.model.clone();
+        let gemini_stream = response.bytes_stream();
+        let model_clone = openai_req.model.clone();
 
-            // 根据响应格式选择不同的 SSE 流转换器
+        // 根据响应格式选择不同的 SSE 流转换器
+        if openai_req.stream {
             let body = match response_format {
                 ResponseFormat::Chat => {
                     use crate::proxy::mappers::openai::streaming::create_openai_sse_stream;
@@ -164,15 +173,17 @@ async fn execute_openai_request_v2(
             return ExecuteResult::StreamResponse(resp);
         }
 
-        match response.json().await {
-            Ok(gemini_resp) => return ExecuteResult::JsonResponse(gemini_resp),
+        let gemini_resp = match collect_openai_sse_response(Box::pin(gemini_stream)).await {
+            Ok(value) => value,
             Err(e) => {
                 return ExecuteResult::FatalError {
                     status: StatusCode::BAD_GATEWAY,
-                    message: format!("Parse error: {}", e),
+                    message: format!("Stream collect error: {}", e),
                 };
             }
-        }
+        };
+
+        return ExecuteResult::JsonResponse(gemini_resp);
     }
 
     // 6. 处理错误响应
@@ -326,6 +337,35 @@ async fn execute_with_retry(
             }
             ExecuteResult::JsonResponse(gemini_resp) => {
                 // 非流式响应 - 根据格式转换
+                if !openai_req.stream {
+                    let cached_tokens = extract_u32(
+                        &gemini_resp,
+                        &["usageMetadata", "cachedContentTokenCount"],
+                    );
+                    let cache_info = if cached_tokens > 0 {
+                        format!(", Cached: {}", cached_tokens)
+                    } else {
+                        String::new()
+                    };
+                    let prompt_tokens =
+                        extract_u32(&gemini_resp, &["usageMetadata", "promptTokenCount"]);
+                    let completion_tokens =
+                        extract_u32(&gemini_resp, &["usageMetadata", "candidatesTokenCount"]);
+                    let model_version = gemini_resp
+                        .get("modelVersion")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&openai_req.model);
+
+                    info!(
+                        "[OpenAI][{}] ✓ Stream collected and converted to JSON | Model: {}, Tokens: In {}, Out {}{}",
+                        stable_session_id,
+                        model_version,
+                        prompt_tokens.saturating_sub(cached_tokens),
+                        completion_tokens,
+                        cache_info
+                    );
+                }
+
                 let response = match response_format {
                     ResponseFormat::Chat => {
                         let openai_response = transform_openai_response(&gemini_resp);

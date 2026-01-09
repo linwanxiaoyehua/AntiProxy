@@ -6,11 +6,13 @@ pub mod request;
 pub mod response;
 pub mod streaming;
 pub mod utils;
+pub mod collector;
 
 pub use models::*;
 pub use request::transform_claude_request_in;
 pub use response::transform_response;
 pub use streaming::{PartProcessor, StreamingState};
+pub use collector::collect_claude_sse_response;
 
 use bytes::Bytes;
 use futures::Stream;
@@ -70,7 +72,7 @@ fn process_sse_line(line: &str, state: &mut StreamingState, trace_id: &str, emai
         return None;
     }
 
-    let data_str = line[6..].trim();
+    let data_str = line.strip_prefix("data: ").unwrap_or_default().trim();
     if data_str.is_empty() {
         return None;
     }
@@ -166,14 +168,14 @@ fn process_sse_line(line: &str, state: &mut StreamingState, trace_id: &str, emai
                 String::new()
             };
             
-             tracing::info!(
-                 "[{}] ✓ Stream completed | Account: {} | In: {} tokens | Out: {} tokens{}", 
-                 trace_id,
-                 email,
-                 u.prompt_token_count.unwrap_or(0).saturating_sub(cached_tokens), 
-                 u.candidates_token_count.unwrap_or(0),
-                 cache_info
-             );
+            tracing::info!(
+                "[{}] ✓ Stream completed | Account: {} | In: {} tokens | Out: {} tokens{}",
+                trace_id,
+                email,
+                u.prompt_token_count.unwrap_or(0).saturating_sub(cached_tokens),
+                u.candidates_token_count.unwrap_or(0),
+                cache_info
+            );
         }
 
         chunks.extend(state.emit_finish(Some(finish_reason), usage.as_ref()));
