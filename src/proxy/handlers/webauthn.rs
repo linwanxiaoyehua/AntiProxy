@@ -1,6 +1,6 @@
-//! WebAuthn API 处理程序
+//! WebAuthn API Handlers
 //!
-//! 提供 Passkey 和密码认证的 REST API
+//! Provides REST API for Passkey and password authentication
 
 use axum::{
     extract::State,
@@ -50,20 +50,20 @@ fn resolve_webauthn_config(headers: &HeaderMap, state: &AppState) -> crate::modu
         .unwrap_or_else(|_| crate::modules::webauthn::WebAuthnConfig::localhost(state.bind_port))
 }
 
-/// 检查认证状态
+/// Check authentication status
 #[derive(Serialize)]
 pub struct AuthStatusResponse {
-    /// 是否已认证
+    /// Whether authenticated
     pub authenticated: bool,
-    /// 是否需要设置 (首次使用)
+    /// Whether setup is needed (first use)
     pub needs_setup: bool,
-    /// 认证模式: "none", "password", "passkey"
+    /// Authentication mode: "none", "password", "passkey"
     pub auth_mode: String,
-    /// 已注册的凭据数量 (仅 passkey 模式)
+    /// Number of registered credentials (passkey mode only)
     pub credential_count: usize,
 }
 
-/// 获取认证状态
+/// Get authentication status
 pub async fn get_auth_status(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -71,7 +71,7 @@ pub async fn get_auth_status(
     let webauthn = &state.webauthn_manager;
     let sessions = &state.session_manager;
 
-    // 检查 session cookie
+    // Check session cookie
     let authenticated = if let Some(cookie) = jar.get(SESSION_COOKIE_NAME) {
         sessions.validate_session(cookie.value()).await
     } else {
@@ -98,13 +98,13 @@ pub async fn get_auth_status(
 
 // ===== Password Authentication =====
 
-/// 设置密码请求
+/// Setup password request
 #[derive(Deserialize)]
 pub struct SetupPasswordRequest {
     pub password: String,
 }
 
-/// 设置密码认证
+/// Setup password authentication
 pub async fn setup_password(
     State(state): State<AppState>,
     Json(req): Json<SetupPasswordRequest>,
@@ -126,13 +126,13 @@ pub async fn setup_password(
     }
 }
 
-/// 密码登录请求
+/// Password login request
 #[derive(Deserialize)]
 pub struct PasswordLoginRequest {
     pub password: String,
 }
 
-/// 密码登录
+/// Password login
 pub async fn password_login(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -141,7 +141,7 @@ pub async fn password_login(
     let webauthn = &state.webauthn_manager;
     let sessions = &state.session_manager;
 
-    // 检查认证模式
+    // Check authentication mode
     let auth_mode = webauthn.get_auth_mode().await;
     if auth_mode != AuthMode::Password {
         return Err((
@@ -150,7 +150,7 @@ pub async fn password_login(
         ));
     }
 
-    // 验证密码
+    // Verify password
     if !webauthn.verify_password(&req.password).await {
         tracing::warn!("Failed password login attempt");
         return Err((
@@ -159,10 +159,10 @@ pub async fn password_login(
         ));
     }
 
-    // 创建 session
+    // Create session
     let session_token = sessions.create_session().await;
 
-    // 设置 cookie
+    // Set cookie
     let cookie = axum_extra::extract::cookie::Cookie::build((SESSION_COOKIE_NAME, session_token))
         .path("/")
         .http_only(true)
@@ -176,14 +176,14 @@ pub async fn password_login(
     Ok((jar, Json(json!({ "success": true }))))
 }
 
-/// 更改密码请求
+/// Change password request
 #[derive(Deserialize)]
 pub struct ChangePasswordRequest {
     pub old_password: String,
     pub new_password: String,
 }
 
-/// 更改密码
+/// Change password
 pub async fn change_password(
     State(state): State<AppState>,
     Json(req): Json<ChangePasswordRequest>,
@@ -205,7 +205,7 @@ pub async fn change_password(
     }
 }
 
-/// 重置认证 (需要当前已认证)
+/// Reset authentication (requires current authentication)
 pub async fn reset_auth(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -213,7 +213,7 @@ pub async fn reset_auth(
     let webauthn = &state.webauthn_manager;
     let sessions = &state.session_manager;
 
-    // 验证当前已认证
+    // Verify current authentication
     let authenticated = if let Some(cookie) = jar.get(SESSION_COOKIE_NAME) {
         sessions.validate_session(cookie.value()).await
     } else {
@@ -229,7 +229,7 @@ pub async fn reset_auth(
 
     match webauthn.reset_auth().await {
         Ok(()) => {
-            // 清除当前 session
+            // Clear current session
             if let Some(cookie) = jar.get(SESSION_COOKIE_NAME) {
                 sessions.delete_session(cookie.value()).await;
             }
@@ -256,14 +256,14 @@ pub async fn reset_auth(
 
 // ===== Passkey Authentication =====
 
-/// 开始注册请求
+/// Start registration request
 #[derive(Deserialize)]
 pub struct StartRegistrationRequest {
-    /// 用户名/设备名称
+    /// Username/device name
     pub name: String,
 }
 
-/// 开始注册 - 返回 WebAuthn challenge
+/// Start registration - returns WebAuthn challenge
 pub async fn start_registration(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -290,18 +290,18 @@ pub async fn start_registration(
     }
 }
 
-/// 完成注册请求
+/// Finish registration request
 #[derive(Deserialize)]
 pub struct FinishRegistrationRequest {
     /// Challenge (from start_registration)
     pub challenge: String,
-    /// 用户名
+    /// Username
     pub name: String,
-    /// WebAuthn 响应
+    /// WebAuthn response
     pub response: Value,
 }
 
-/// 完成注册
+/// Finish registration
 pub async fn finish_registration(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -311,7 +311,7 @@ pub async fn finish_registration(
 
     let config = resolve_webauthn_config(&headers, &state);
 
-    // 解析 WebAuthn 响应
+    // Parse WebAuthn response
     let credential: webauthn_rs::prelude::RegisterPublicKeyCredential =
         serde_json::from_value(req.response).map_err(|e| {
             tracing::error!("Failed to parse registration response: {}", e);
@@ -339,7 +339,7 @@ pub async fn finish_registration(
     }
 }
 
-/// 开始认证 - 返回 WebAuthn challenge
+/// Start authentication - returns WebAuthn challenge
 pub async fn start_authentication(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -365,16 +365,16 @@ pub async fn start_authentication(
     }
 }
 
-/// 完成认证请求
+/// Finish authentication request
 #[derive(Deserialize)]
 pub struct FinishAuthenticationRequest {
     /// Challenge (from start_authentication)
     pub challenge: String,
-    /// WebAuthn 响应
+    /// WebAuthn response
     pub response: Value,
 }
 
-/// 完成认证
+/// Finish authentication
 pub async fn finish_authentication(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -386,7 +386,7 @@ pub async fn finish_authentication(
 
     let config = resolve_webauthn_config(&headers, &state);
 
-    // 解析 WebAuthn 响应
+    // Parse WebAuthn response
     let credential: webauthn_rs::prelude::PublicKeyCredential =
         serde_json::from_value(req.response).map_err(|e| {
             tracing::error!("Failed to parse authentication response: {}", e);
@@ -401,10 +401,10 @@ pub async fn finish_authentication(
         .await
     {
         Ok(_) => {
-            // 创建 session
+            // Create session
             let session_token = sessions.create_session().await;
 
-            // 设置 cookie (HttpOnly, 7天有效)
+            // Set cookie (HttpOnly, 7 days validity)
             let cookie = axum_extra::extract::cookie::Cookie::build((SESSION_COOKIE_NAME, session_token))
                 .path("/")
                 .http_only(true)
@@ -427,19 +427,19 @@ pub async fn finish_authentication(
     }
 }
 
-/// 登出
+/// Logout
 pub async fn logout(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> impl IntoResponse {
     let sessions = &state.session_manager;
 
-    // 删除 session
+    // Delete session
     if let Some(cookie) = jar.get(SESSION_COOKIE_NAME) {
         sessions.delete_session(cookie.value()).await;
     }
 
-    // 清除 cookie
+    // Clear cookie
     let cookie = axum_extra::extract::cookie::Cookie::build((SESSION_COOKIE_NAME, ""))
         .path("/")
         .max_age(time::Duration::ZERO)
@@ -450,7 +450,7 @@ pub async fn logout(
     (jar, Json(json!({ "success": true })))
 }
 
-/// 列出已注册的凭据
+/// List registered credentials
 pub async fn list_credentials(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
@@ -460,20 +460,20 @@ pub async fn list_credentials(
     Json(json!({ "credentials": credentials }))
 }
 
-/// 删除凭据请求
+/// Delete credential request
 #[derive(Deserialize)]
 pub struct DeleteCredentialRequest {
     pub credential_id: String,
 }
 
-/// 删除凭据
+/// Delete credential
 pub async fn delete_credential(
     State(state): State<AppState>,
     Json(req): Json<DeleteCredentialRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let webauthn = &state.webauthn_manager;
 
-    // 确保至少保留一个凭据
+    // Ensure at least one credential remains
     if webauthn.credential_count().await <= 1 {
         return Err((
             StatusCode::BAD_REQUEST,

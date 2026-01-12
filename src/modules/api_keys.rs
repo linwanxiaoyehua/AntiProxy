@@ -1,5 +1,5 @@
-//! API Keys 管理模块
-//! 支持多 key 隔离和用量追踪
+//! API Keys management module
+//! Supports multi-key isolation and usage tracking
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -14,19 +14,19 @@ pub struct ApiKey {
     pub enabled: bool,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
-    /// 总请求数
+    /// Total requests
     pub total_requests: u64,
-    /// 成功请求数
+    /// Successful requests
     pub success_count: u64,
-    /// 失败请求数
+    /// Failed requests
     pub error_count: u64,
-    /// 总输入 tokens
+    /// Total input tokens
     pub total_input_tokens: u64,
-    /// 总输出 tokens
+    /// Total output tokens
     pub total_output_tokens: u64,
 }
 
-/// API Key 用量统计
+/// API Key usage statistics
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ApiKeyUsage {
     pub total_requests: u64,
@@ -36,13 +36,13 @@ pub struct ApiKeyUsage {
     pub total_output_tokens: u64,
 }
 
-/// 创建 API Key 请求
+/// Create API Key request
 #[derive(Debug, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub name: String,
 }
 
-/// API Key 响应（隐藏完整 key）
+/// API Key response (hides full key)
 #[derive(Debug, Serialize)]
 pub struct ApiKeyResponse {
     pub id: String,
@@ -85,7 +85,7 @@ fn get_db_path() -> Result<PathBuf, String> {
     Ok(data_dir.join("api_keys.db"))
 }
 
-/// 初始化数据库
+/// Initialize database
 pub fn init_db() -> Result<(), String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -108,7 +108,7 @@ pub fn init_db() -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
-    // 创建 key 索引用于快速查找
+    // Create key index for fast lookup
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys (key)",
         [],
@@ -118,12 +118,12 @@ pub fn init_db() -> Result<(), String> {
     Ok(())
 }
 
-/// 生成新的 API Key
+/// Generate new API Key
 pub fn generate_key() -> String {
     format!("sk-{}", uuid::Uuid::new_v4().simple())
 }
 
-/// 创建新的 API Key
+/// Create new API Key
 pub fn create_api_key(name: &str) -> Result<ApiKey, String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -154,7 +154,7 @@ pub fn create_api_key(name: &str) -> Result<ApiKey, String> {
     })
 }
 
-/// 获取所有 API Keys
+/// Get all API Keys
 pub fn list_api_keys() -> Result<Vec<ApiKey>, String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -193,7 +193,7 @@ pub fn list_api_keys() -> Result<Vec<ApiKey>, String> {
     Ok(keys)
 }
 
-/// 根据 key 字符串查找 API Key（用于认证）
+/// Find API Key by key string (for authentication)
 pub fn find_by_key(key_str: &str) -> Result<Option<ApiKey>, String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -230,7 +230,7 @@ pub fn find_by_key(key_str: &str) -> Result<Option<ApiKey>, String> {
     }
 }
 
-/// 获取单个 API Key
+/// Get single API Key
 pub fn get_api_key(id: &str) -> Result<Option<ApiKey>, String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -267,7 +267,7 @@ pub fn get_api_key(id: &str) -> Result<Option<ApiKey>, String> {
     }
 }
 
-/// 更新 API Key 名称
+/// Update API Key name
 pub fn update_api_key_name(id: &str, name: &str) -> Result<(), String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -281,7 +281,7 @@ pub fn update_api_key_name(id: &str, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 启用/禁用 API Key
+/// Enable/disable API Key
 pub fn set_api_key_enabled(id: &str, enabled: bool) -> Result<(), String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -295,7 +295,7 @@ pub fn set_api_key_enabled(id: &str, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 删除 API Key
+/// Delete API Key
 pub fn delete_api_key(id: &str) -> Result<(), String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -306,7 +306,7 @@ pub fn delete_api_key(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 重新生成 API Key
+/// Regenerate API Key
 pub fn regenerate_api_key(id: &str) -> Result<String, String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -322,7 +322,7 @@ pub fn regenerate_api_key(id: &str) -> Result<String, String> {
     Ok(new_key)
 }
 
-/// 记录 API Key 使用（用于统计）
+/// Record API Key usage (for statistics)
 pub fn record_usage(
     key_str: &str,
     success: bool,
@@ -363,7 +363,7 @@ pub fn record_usage(
     Ok(())
 }
 
-/// 重置 API Key 用量统计
+/// Reset API Key usage statistics
 pub fn reset_usage(id: &str) -> Result<(), String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -383,7 +383,7 @@ pub fn reset_usage(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 获取所有 API Keys 的总用量
+/// Get total usage of all API Keys
 pub fn get_total_usage() -> Result<ApiKeyUsage, String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -414,7 +414,7 @@ pub fn get_total_usage() -> Result<ApiKeyUsage, String> {
     }
 }
 
-/// 检查是否有任何 API Key 存在
+/// Check if any API Key exists
 pub fn has_any_keys() -> Result<bool, String> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -426,23 +426,23 @@ pub fn has_any_keys() -> Result<bool, String> {
     Ok(count > 0)
 }
 
-/// 迁移旧的单一 API Key 到新的多 key 系统
+/// Migrate old single API Key to new multi-key system
 pub fn migrate_legacy_key(legacy_key: &str) -> Result<(), String> {
     if legacy_key.is_empty() {
         return Ok(());
     }
 
-    // 检查是否已经存在这个 key
+    // Check if this key already exists
     if let Ok(Some(_)) = find_by_key(legacy_key) {
-        return Ok(()); // 已存在，不需要迁移
+        return Ok(()); // Already exists, no migration needed
     }
 
-    // 检查是否已有任何 key
+    // Check if any keys already exist
     if has_any_keys()? {
-        return Ok(()); // 已有 keys，不需要迁移
+        return Ok(()); // Keys already exist, no migration needed
     }
 
-    // 创建迁移的 key
+    // Create the migrated key
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 

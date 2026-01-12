@@ -1,5 +1,5 @@
-// Handlers 模块 - API 端点处理器
-// 核心端点处理器模块
+// Handlers module - API endpoint handlers
+// Core endpoint handler module
 
 pub mod api_keys;
 pub mod claude;

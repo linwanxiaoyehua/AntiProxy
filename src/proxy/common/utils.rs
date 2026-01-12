@@ -1,4 +1,4 @@
-// 工具函数
+// Utility functions
 
 pub fn generate_random_id() -> String {
     use rand::Rng;
@@ -9,8 +9,8 @@ pub fn generate_random_id() -> String {
         .collect()
 }
 
-/// 根据模型名称推测功能类型
-// 注意：此函数已弃用，请改用 mappers::common_utils::resolve_request_config
+/// Infer feature type based on model name
+// Note: This function is deprecated, please use mappers::common_utils::resolve_request_config instead
 pub fn _deprecated_infer_quota_group(model: &str) -> String {
     if model.to_lowercase().starts_with("claude") {
         "claude".to_string()

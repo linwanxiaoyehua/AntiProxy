@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-/// 调度模式枚举
+/// Scheduling mode enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum SchedulingMode {
-    /// 缓存优先 (Cache-first): 尽可能锁定同一账号，限流时优先等待，极大提升 Prompt Caching 命中率
+    /// Cache-first: Lock to the same account as much as possible, prefer to wait when rate limited, greatly improves Prompt Caching hit rate
     CacheFirst,
-    /// 平衡模式 (Balance): 锁定同一账号，限流时立即切换到备选账号，兼顾成功率和性能
+    /// Balance: Lock to the same account, immediately switch to backup account when rate limited, balancing success rate and performance
     Balance,
-    /// 性能优先 (Performance-first): 纯轮询模式 (Round-robin)，账号负载最均衡，但不利用缓存
+    /// Performance-first: Pure round-robin mode, most balanced account load, but doesn't utilize cache
     PerformanceFirst,
 }
 
@@ -17,22 +17,22 @@ impl Default for SchedulingMode {
     }
 }
 
-/// 粘性会话配置
+/// Sticky session configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StickySessionConfig {
-    /// 当前调度模式
+    /// Current scheduling mode
     pub mode: SchedulingMode,
-    /// 缓存优先模式下的最大等待时间 (秒)
+    /// Maximum wait time in cache-first mode (seconds)
     pub max_wait_seconds: u64,
 }
 
 impl Default for StickySessionConfig {
     fn default() -> Self {
         Self {
-            // 默认使用 CacheFirst 模式，避免单个会话中多账号消耗
-            // 当账号被限流时，会等待（最多 max_wait_seconds）而不是切换账号
+            // Default to CacheFirst mode to avoid multi-account consumption within a single session
+            // When account is rate limited, will wait (up to max_wait_seconds) instead of switching accounts
             mode: SchedulingMode::CacheFirst,
-            max_wait_seconds: 120,  // 最多等待 2 分钟
+            max_wait_seconds: 120,  // Maximum wait 2 minutes
         }
     }
 }

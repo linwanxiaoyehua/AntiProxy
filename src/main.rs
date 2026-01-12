@@ -43,12 +43,12 @@ async fn main() -> Result<(), String> {
     let data_dir = modules::account::get_data_dir()?;
     let _ = modules::account::get_accounts_dir()?;
 
-    // 初始化 API Keys 数据库
+    // Initialize API Keys database
     if let Err(e) = modules::api_keys::init_db() {
         tracing::error!("failed to initialize API keys database: {}", e);
     }
 
-    // 迁移旧的单一 API Key 到多 key 系统
+    // Migrate legacy single API Key to multi-key system
     if let Err(e) = modules::api_keys::migrate_legacy_key(&proxy_config.api_key) {
         tracing::warn!("failed to migrate legacy API key: {}", e);
     }

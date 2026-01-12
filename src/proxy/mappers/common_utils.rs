@@ -33,9 +33,9 @@ pub fn resolve_request_config(
         };
     }
 
-    // 检测是否有联网工具定义 (内置功能调用)
+    // Detect if there is a networking tool definition (built-in function call)
     let has_networking_tool = detects_networking_tool(tools);
-    // 检测是否包含非联网工具 (如 MCP 本地工具)
+    // Detect if there are non-networking tools (e.g., MCP local tools)
     let _has_non_networking = contains_non_networking_tool(tools);
 
     // Strip -online suffix from original model if present (to detect networking intent)
@@ -55,8 +55,8 @@ pub fn resolve_request_config(
         || mapped_model.contains("claude-4");
 
     // Determine if we should enable networking
-    // [FIX] 禁用基于模型的自动联网逻辑，防止图像请求被联网搜索结果覆盖。
-    // 仅在用户显式请求联网时启用：1) -online 后缀 2) 携带联网工具定义
+    // [FIX] Disable automatic networking logic based on model to prevent image requests from being overwritten by web search results.
+    // Only enable networking when explicitly requested by user: 1) -online suffix 2) networking tool definition provided
     let enable_networking = is_online_suffix || has_networking_tool;
 
     // The final model to send upstream should be the MAPPED model, 
@@ -117,8 +117,8 @@ pub fn inject_google_search_tool(body: &mut Value) {
     if let Some(obj) = body.as_object_mut() {
         let tools_entry = obj.entry("tools").or_insert_with(|| json!([]));
         if let Some(tools_arr) = tools_entry.as_array_mut() {
-            // [安全校验] 如果数组中已经包含 functionDeclarations，严禁注入 googleSearch
-            // 因为 Gemini v1internal 不支持在一次请求中混用 search 和 functions
+            // [Safety check] If the array already contains functionDeclarations, do not inject googleSearch
+            // Because Gemini v1internal does not support mixing search and functions in a single request
             let has_functions = tools_arr.iter().any(|t| {
                 t.as_object().map_or(false, |o| o.contains_key("functionDeclarations"))
             });
@@ -128,7 +128,7 @@ pub fn inject_google_search_tool(body: &mut Value) {
                 return;
             }
 
-            // 首先清理掉已存在的 googleSearch 或 googleSearchRetrieval，以防重复产生冲突
+            // First remove any existing googleSearch or googleSearchRetrieval to prevent duplicate conflicts
             tools_arr.retain(|t| {
                 if let Some(o) = t.as_object() {
                     !(o.contains_key("googleSearch") || o.contains_key("googleSearchRetrieval"))
@@ -137,7 +137,7 @@ pub fn inject_google_search_tool(body: &mut Value) {
                 }
             });
 
-            // 注入统一的 googleSearch (v1internal 规范)
+            // Inject the unified googleSearch (v1internal specification)
             tools_arr.push(json!({
                 "googleSearch": {}
             }));
@@ -145,11 +145,11 @@ pub fn inject_google_search_tool(body: &mut Value) {
     }
 }
 
-/// 深度迭代清理客户端发送的 [undefined] 脏字符串，防止 Gemini 接口校验失败
+/// Recursively clean "[undefined]" dirty strings sent by client to prevent Gemini API validation failures
 pub fn deep_clean_undefined(value: &mut Value) {
     match value {
         Value::Object(map) => {
-            // 移除值为 "[undefined]" 的键
+            // Remove keys with value "[undefined]"
             map.retain(|_, v| {
                 if let Some(s) = v.as_str() {
                     s != "[undefined]"
@@ -157,7 +157,7 @@ pub fn deep_clean_undefined(value: &mut Value) {
                     true
                 }
             });
-            // 递归处理嵌套
+            // Recursively process nested values
             for v in map.values_mut() {
                 deep_clean_undefined(v);
             }
@@ -176,7 +176,7 @@ pub fn deep_clean_undefined(value: &mut Value) {
 pub fn detects_networking_tool(tools: &Option<Vec<Value>>) -> bool {
     if let Some(list) = tools {
         for tool in list {
-            // 1. 直发风格 (Claude/Simple OpenAI/Anthropic Builtin/Vertex): { "name": "..." } 或 { "type": "..." }
+            // 1. Direct style (Claude/Simple OpenAI/Anthropic Builtin/Vertex): { "name": "..." } or { "type": "..." }
             if let Some(n) = tool.get("name").and_then(|v| v.as_str()) {
                 if n == "web_search" || n == "google_search" || n == "web_search_20250305" || n == "google_search_retrieval" {
                     return true;
@@ -189,7 +189,7 @@ pub fn detects_networking_tool(tools: &Option<Vec<Value>>) -> bool {
                 }
             }
 
-            // 2. OpenAI 嵌套风格: { "type": "function", "function": { "name": "..." } }
+            // 2. OpenAI nested style: { "type": "function", "function": { "name": "..." } }
             if let Some(func) = tool.get("function") {
                 if let Some(n) = func.get("name").and_then(|v| v.as_str()) {
                     let keywords = ["web_search", "google_search", "web_search_20250305", "google_search_retrieval"];
@@ -199,7 +199,7 @@ pub fn detects_networking_tool(tools: &Option<Vec<Value>>) -> bool {
                 }
             }
 
-            // 3. Gemini 原生风格: { "functionDeclarations": [ { "name": "..." } ] }
+            // 3. Gemini native style: { "functionDeclarations": [ { "name": "..." } ] }
             if let Some(decls) = tool.get("functionDeclarations").and_then(|v| v.as_array()) {
                 for decl in decls {
                     if let Some(n) = decl.get("name").and_then(|v| v.as_str()) {
@@ -210,7 +210,7 @@ pub fn detects_networking_tool(tools: &Option<Vec<Value>>) -> bool {
                 }
             }
 
-            // 4. Gemini googleSearch 声明 (含 googleSearchRetrieval 变体)
+            // 4. Gemini googleSearch declaration (including googleSearchRetrieval variant)
             if tool.get("googleSearch").is_some() || tool.get("googleSearchRetrieval").is_some() {
                 return true;
             }
@@ -219,13 +219,13 @@ pub fn detects_networking_tool(tools: &Option<Vec<Value>>) -> bool {
     false
 }
 
-/// 探测是否包含非联网相关的本地函数工具
+/// Detect if there are non-networking local function tools
 pub fn contains_non_networking_tool(tools: &Option<Vec<Value>>) -> bool {
     if let Some(list) = tools {
         for tool in list {
             let mut is_networking = false;
             
-            // 简单逻辑：如果它是一个函数声明且名字不是联网关键词，则视为非联网工具
+            // Simple logic: if it is a function declaration and the name is not a networking keyword, consider it a non-networking tool
             if let Some(n) = tool.get("name").and_then(|v| v.as_str()) {
                  let keywords = ["web_search", "google_search", "web_search_20250305", "google_search_retrieval"];
                  if keywords.contains(&n) { is_networking = true; }
@@ -237,18 +237,18 @@ pub fn contains_non_networking_tool(tools: &Option<Vec<Value>>) -> bool {
             } else if tool.get("googleSearch").is_some() || tool.get("googleSearchRetrieval").is_some() {
                 is_networking = true;
             } else if tool.get("functionDeclarations").is_some() {
-                // 如果是 Gemini 风格的 functionDeclarations，进去看一眼
+                // If it's Gemini-style functionDeclarations, take a look inside
                 if let Some(decls) = tool.get("functionDeclarations").and_then(|v| v.as_array()) {
                     for decl in decls {
                         if let Some(n) = decl.get("name").and_then(|v| v.as_str()) {
                             let keywords = ["web_search", "google_search", "google_search_retrieval"];
                             if !keywords.contains(&n) {
-                                return true; // 发现本地函数
+                                return true; // Found a local function
                             }
                         }
                     }
                 }
-                is_networking = true; // 即使全是联网，外层也标记为联网
+                is_networking = true; // Even if all are networking tools, mark the outer layer as networking
             }
 
             if !is_networking {

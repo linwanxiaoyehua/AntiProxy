@@ -1,7 +1,7 @@
-//! WebAuthn (Passkey) 认证模块
+//! WebAuthn (Passkey) authentication module
 //!
-//! 实现 FIDO2/WebAuthn 标准的 Passkey 认证流程
-//! 支持密码和 Passkey 二选一模式
+//! Implements FIDO2/WebAuthn standard Passkey authentication flow
+//! Supports password and Passkey either-or mode
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -9,15 +9,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use webauthn_rs::prelude::*;
 
-/// 认证模式
+/// Authentication mode
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMode {
-    /// 未设置 (首次使用)
+    /// Not configured (first use)
     None,
-    /// 密码认证
+    /// Password authentication
     Password,
-    /// Passkey 认证
+    /// Passkey authentication
     Passkey,
 }
 
@@ -27,18 +27,18 @@ impl Default for AuthMode {
     }
 }
 
-/// 认证配置存储
+/// Authentication configuration storage
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthConfig {
-    /// 认证模式
+    /// Authentication mode
     pub mode: AuthMode,
-    /// 密码哈希 (仅密码模式)
+    /// Password hash (password mode only)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password_hash: Option<String>,
 }
 
 impl AuthConfig {
-    /// 创建密码认证配置
+    /// Create password authentication configuration
     pub fn with_password(password: &str) -> Result<Self, String> {
         let hash = hash_password(password)?;
         Ok(Self {
@@ -47,7 +47,7 @@ impl AuthConfig {
         })
     }
 
-    /// 验证密码
+    /// Verify password
     pub fn verify_password(&self, password: &str) -> bool {
         if self.mode != AuthMode::Password {
             return false;
@@ -59,7 +59,7 @@ impl AuthConfig {
     }
 }
 
-/// 使用 argon2 哈希密码
+/// Hash password using argon2
 fn hash_password(password: &str) -> Result<String, String> {
     use argon2::{
         password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -75,7 +75,7 @@ fn hash_password(password: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to hash password: {}", e))
 }
 
-/// 验证密码
+/// Verify password
 fn verify_password(password: &str, hash: &str) -> bool {
     use argon2::{
         password_hash::{PasswordHash, PasswordVerifier},
@@ -92,23 +92,23 @@ fn verify_password(password: &str, hash: &str) -> bool {
         .is_ok()
 }
 
-/// WebAuthn 配置
+/// WebAuthn configuration
 #[derive(Debug, Clone)]
 pub struct WebAuthnConfig {
-    /// Relying Party ID (通常是域名)
+    /// Relying Party ID (usually the domain name)
     pub rp_id: String,
-    /// Relying Party 名称
+    /// Relying Party name
     pub rp_name: String,
-    /// Relying Party Origin (完整 URL)
+    /// Relying Party Origin (full URL)
     pub rp_origin: Url,
 }
 
 impl WebAuthnConfig {
-    /// 从请求 Host 头动态创建配置
+    /// Dynamically create configuration from request Host header
     pub fn from_host(host: &str, port: u16, is_https: bool) -> Result<Self, String> {
         let scheme = if is_https { "https" } else { "http" };
 
-        // 解析 host，可能包含端口
+        // Parse host, which may contain port
         let (hostname, _) = host.split_once(':').unwrap_or((host, ""));
         let hostname = if hostname.is_empty() { "localhost" } else { hostname };
 
@@ -128,7 +128,7 @@ impl WebAuthnConfig {
         })
     }
 
-    /// 默认本地配置
+    /// Default localhost configuration
     pub fn localhost(port: u16) -> Self {
         Self {
             rp_id: "localhost".to_string(),
@@ -138,20 +138,20 @@ impl WebAuthnConfig {
     }
 }
 
-/// 存储的 Passkey 凭据
+/// Stored Passkey credential
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredCredential {
-    /// 凭据 ID
+    /// Credential ID
     pub credential_id: String,
-    /// 用户 ID
+    /// User ID
     pub user_id: String,
-    /// 用户显示名称
+    /// User display name
     pub user_name: String,
-    /// 序列化的 Passkey 数据
+    /// Serialized Passkey data
     pub passkey_json: String,
-    /// 创建时间
+    /// Creation time
     pub created_at: i64,
-    /// 最后使用时间
+    /// Last used time
     pub last_used_at: Option<i64>,
 }
 
@@ -161,24 +161,24 @@ struct AuthStateEntry {
     created_at: i64,
 }
 
-/// WebAuthn 管理器
+/// WebAuthn manager
 pub struct WebAuthnManager {
-    /// 凭据存储路径
+    /// Credentials storage path
     credentials_path: PathBuf,
-    /// 认证配置路径
+    /// Authentication configuration path
     auth_config_path: PathBuf,
-    /// 缓存的凭据列表
+    /// Cached credentials list
     credentials: Arc<RwLock<Vec<StoredCredential>>>,
-    /// 认证配置
+    /// Authentication configuration
     auth_config: Arc<RwLock<AuthConfig>>,
-    /// 注册状态缓存 (challenge -> state, with TTL)
+    /// Registration state cache (challenge -> state, with TTL)
     reg_states: Arc<RwLock<std::collections::HashMap<String, AuthStateEntry>>>,
-    /// 认证状态缓存 (challenge -> state, with TTL)
+    /// Authentication state cache (challenge -> state, with TTL)
     auth_states: Arc<RwLock<std::collections::HashMap<String, AuthStateEntry>>>,
 }
 
 impl WebAuthnManager {
-    /// 创建新的 WebAuthn 管理器
+    /// Create a new WebAuthn manager
     pub fn new(data_dir: PathBuf) -> Self {
         let credentials_path = data_dir.join("passkeys.json");
         let auth_config_path = data_dir.join("auth_config.json");
@@ -193,7 +193,7 @@ impl WebAuthnManager {
         }
     }
 
-    /// 加载认证配置
+    /// Load authentication configuration
     pub async fn load_auth_config(&self) -> Result<(), String> {
         if !self.auth_config_path.exists() {
             return Ok(());
@@ -212,13 +212,13 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 保存认证配置
+    /// Save authentication configuration
     async fn save_auth_config(&self) -> Result<(), String> {
         let config = self.auth_config.read().await;
         let content = serde_json::to_string_pretty(&*config)
             .map_err(|e| format!("Failed to serialize auth config: {}", e))?;
 
-        // 确保目录存在
+        // Ensure directory exists
         if let Some(parent) = self.auth_config_path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -232,21 +232,21 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 获取当前认证模式
+    /// Get current authentication mode
     pub async fn get_auth_mode(&self) -> AuthMode {
         let config = self.auth_config.read().await;
         config.mode.clone()
     }
 
-    /// 设置密码认证
+    /// Set up password authentication
     pub async fn setup_password(&self, password: &str) -> Result<(), String> {
-        // 检查是否已有认证模式
+        // Check if authentication mode is already configured
         let current_mode = self.get_auth_mode().await;
         if current_mode != AuthMode::None {
             return Err("Authentication is already configured. Reset first to change mode.".to_string());
         }
 
-        // 验证密码强度
+        // Validate password strength
         if password.len() < 6 {
             return Err("Password must be at least 6 characters".to_string());
         }
@@ -264,20 +264,20 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 验证密码
+    /// Verify password
     pub async fn verify_password(&self, password: &str) -> bool {
         let config = self.auth_config.read().await;
         config.verify_password(password)
     }
 
-    /// 更改密码
+    /// Change password
     pub async fn change_password(&self, old_password: &str, new_password: &str) -> Result<(), String> {
-        // 验证旧密码
+        // Verify old password
         if !self.verify_password(old_password).await {
             return Err("Current password is incorrect".to_string());
         }
 
-        // 验证新密码强度
+        // Validate new password strength
         if new_password.len() < 6 {
             return Err("New password must be at least 6 characters".to_string());
         }
@@ -295,9 +295,9 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 重置认证 (危险操作，需要当前认证)
+    /// Reset authentication (dangerous operation, requires current authentication)
     pub async fn reset_auth(&self) -> Result<(), String> {
-        // 清除 passkeys
+        // Clear passkeys
         {
             let mut credentials = self.credentials.write().await;
             credentials.clear();
@@ -308,7 +308,7 @@ impl WebAuthnManager {
                 .map_err(|e| format!("Failed to remove credentials file: {}", e))?;
         }
 
-        // 重置配置
+        // Reset configuration
         {
             let mut auth_config = self.auth_config.write().await;
             *auth_config = AuthConfig::default();
@@ -319,7 +319,7 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 加载凭据
+    /// Load credentials
     pub async fn load_credentials(&self) -> Result<(), String> {
         if !self.credentials_path.exists() {
             return Ok(());
@@ -338,7 +338,7 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 保存凭据
+    /// Save credentials
     async fn save_credentials(&self) -> Result<(), String> {
         let credentials = self.credentials.read().await;
         let content = serde_json::to_string_pretty(&*credentials)
@@ -351,25 +351,25 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 检查是否有已注册的凭据
+    /// Check if there are registered credentials
     pub async fn has_credentials(&self) -> bool {
         let credentials = self.credentials.read().await;
         !credentials.is_empty()
     }
 
-    /// 获取凭据数量
+    /// Get credential count
     pub async fn credential_count(&self) -> usize {
         let credentials = self.credentials.read().await;
         credentials.len()
     }
 
-    /// 开始注册流程
+    /// Start registration flow
     pub async fn start_registration(
         &self,
         config: &WebAuthnConfig,
         user_name: &str,
     ) -> Result<(CreationChallengeResponse, String), String> {
-        // 检查认证模式
+        // Check authentication mode
         let current_mode = self.get_auth_mode().await;
         if current_mode == AuthMode::Password {
             return Err("Password authentication is configured. Reset to switch to Passkey.".to_string());
@@ -381,10 +381,10 @@ impl WebAuthnManager {
             .build()
             .map_err(|e| format!("Failed to build WebAuthn: {}", e))?;
 
-        // 生成用户 ID
+        // Generate user ID
         let user_id = uuid::Uuid::new_v4();
 
-        // 获取现有凭据以排除
+        // Get existing credentials to exclude
         let credentials = self.credentials.read().await;
         let exclude_credentials: Vec<CredentialID> = credentials
             .iter()
@@ -399,7 +399,7 @@ impl WebAuthnManager {
             .start_passkey_registration(user_id, user_name, user_name, Some(exclude_credentials))
             .map_err(|e| format!("Failed to start registration: {}", e))?;
 
-        // 序列化状态并存储
+        // Serialize state and store
         let state_json = serde_json::to_string(&reg_state)
             .map_err(|e| format!("Failed to serialize reg state: {}", e))?;
 
@@ -422,7 +422,7 @@ impl WebAuthnManager {
         Ok((ccr, challenge_b64))
     }
 
-    /// 完成注册流程
+    /// Finish registration flow
     pub async fn finish_registration(
         &self,
         config: &WebAuthnConfig,
@@ -436,7 +436,7 @@ impl WebAuthnManager {
             .build()
             .map_err(|e| format!("Failed to build WebAuthn: {}", e))?;
 
-        // 获取并移除注册状态
+        // Get and remove registration state
         let state_entry = {
             let mut reg_states = self.reg_states.write().await;
             reg_states.remove(challenge)
@@ -451,12 +451,12 @@ impl WebAuthnManager {
         let reg_state: PasskeyRegistration = serde_json::from_str(&state_entry.state_json)
             .map_err(|e| format!("Failed to deserialize reg state: {}", e))?;
 
-        // 完成注册
+        // Complete registration
         let passkey = webauthn
             .finish_passkey_registration(&response, &reg_state)
             .map_err(|e| format!("Failed to finish registration: {}", e))?;
 
-        // 存储凭据
+        // Store credential
         let passkey_json = serde_json::to_string(&passkey)
             .map_err(|e| format!("Failed to serialize passkey: {}", e))?;
 
@@ -481,7 +481,7 @@ impl WebAuthnManager {
 
         self.save_credentials().await?;
 
-        // 设置认证模式为 Passkey (如果是首次注册)
+        // Set authentication mode to Passkey (if first registration)
         let current_mode = self.get_auth_mode().await;
         if current_mode == AuthMode::None {
             let mut auth_config = self.auth_config.write().await;
@@ -494,7 +494,7 @@ impl WebAuthnManager {
         Ok(())
     }
 
-    /// 开始认证流程
+    /// Start authentication flow
     pub async fn start_authentication(
         &self,
         config: &WebAuthnConfig,
@@ -505,7 +505,7 @@ impl WebAuthnManager {
             .build()
             .map_err(|e| format!("Failed to build WebAuthn: {}", e))?;
 
-        // 获取所有已注册的 passkeys
+        // Get all registered passkeys
         let credentials = self.credentials.read().await;
         let passkeys: Vec<Passkey> = credentials
             .iter()
@@ -521,7 +521,7 @@ impl WebAuthnManager {
             .start_passkey_authentication(&passkeys)
             .map_err(|e| format!("Failed to start authentication: {}", e))?;
 
-        // 序列化状态并存储
+        // Serialize state and store
         let state_json = serde_json::to_string(&auth_state)
             .map_err(|e| format!("Failed to serialize auth state: {}", e))?;
 
@@ -544,7 +544,7 @@ impl WebAuthnManager {
         Ok((rcr, challenge_b64))
     }
 
-    /// 完成认证流程
+    /// Finish authentication flow
     pub async fn finish_authentication(
         &self,
         config: &WebAuthnConfig,
@@ -557,7 +557,7 @@ impl WebAuthnManager {
             .build()
             .map_err(|e| format!("Failed to build WebAuthn: {}", e))?;
 
-        // 获取并移除认证状态
+        // Get and remove authentication state
         let state_entry = {
             let mut auth_states = self.auth_states.write().await;
             auth_states.remove(challenge)
@@ -572,12 +572,12 @@ impl WebAuthnManager {
         let auth_state: PasskeyAuthentication = serde_json::from_str(&state_entry.state_json)
             .map_err(|e| format!("Failed to deserialize auth state: {}", e))?;
 
-        // 完成认证
+        // Complete authentication
         let auth_result = webauthn
             .finish_passkey_authentication(&response, &auth_state)
             .map_err(|e| format!("Failed to finish authentication: {}", e))?;
 
-        // 更新凭据的最后使用时间
+        // Update credential last used time
         let cred_id_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::URL_SAFE_NO_PAD,
             auth_result.cred_id().as_ref(),
@@ -588,7 +588,7 @@ impl WebAuthnManager {
             if let Some(cred) = credentials.iter_mut().find(|c| c.credential_id == cred_id_b64) {
                 cred.last_used_at = Some(chrono::Utc::now().timestamp());
 
-                // 更新 passkey 的计数器
+                // Update passkey counter
                 if let Ok(mut passkey) = serde_json::from_str::<Passkey>(&cred.passkey_json) {
                     passkey.update_credential(&auth_result);
                     if let Ok(updated_json) = serde_json::to_string(&passkey) {
@@ -600,13 +600,13 @@ impl WebAuthnManager {
 
         self.save_credentials().await?;
 
-        // 生成 session token
+        // Generate session token
         let session_token = uuid::Uuid::new_v4().to_string();
 
         Ok(session_token)
     }
 
-    /// 删除凭据
+    /// Delete credential
     pub async fn delete_credential(&self, credential_id: &str) -> Result<(), String> {
         {
             let mut credentials = self.credentials.write().await;
@@ -621,7 +621,7 @@ impl WebAuthnManager {
         self.save_credentials().await
     }
 
-    /// 列出所有凭据 (不包含敏感数据)
+    /// List all credentials (excluding sensitive data)
     pub async fn list_credentials(&self) -> Vec<CredentialInfo> {
         let credentials = self.credentials.read().await;
         credentials
@@ -635,7 +635,7 @@ impl WebAuthnManager {
             .collect()
     }
 
-    /// 清理过期的注册/认证状态 (5分钟过期)
+    /// Clean up expired registration/authentication states (5 minute expiry)
     pub async fn cleanup_expired_states(&self) {
         let now = chrono::Utc::now().timestamp();
         let mut reg_states = self.reg_states.write().await;
@@ -646,7 +646,7 @@ impl WebAuthnManager {
     }
 }
 
-/// 凭据信息 (公开)
+/// Credential information (public)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CredentialInfo {
     pub credential_id: String,
@@ -655,11 +655,11 @@ pub struct CredentialInfo {
     pub last_used_at: Option<i64>,
 }
 
-/// Session 管理器
+/// Session manager
 pub struct SessionManager {
-    /// 活跃的 sessions (token -> expiry timestamp)
+    /// Active sessions (token -> expiry timestamp)
     sessions: Arc<RwLock<std::collections::HashMap<String, i64>>>,
-    /// Session 有效期 (秒)
+    /// Session validity period (seconds)
     session_ttl: i64,
 }
 
@@ -671,7 +671,7 @@ impl SessionManager {
         }
     }
 
-    /// 创建新 session
+    /// Create new session
     pub async fn create_session(&self) -> String {
         let token = uuid::Uuid::new_v4().to_string();
         let expiry = chrono::Utc::now().timestamp() + self.session_ttl;
@@ -682,7 +682,7 @@ impl SessionManager {
         token
     }
 
-    /// 验证 session
+    /// Validate session
     pub async fn validate_session(&self, token: &str) -> bool {
         let sessions = self.sessions.read().await;
 
@@ -694,7 +694,7 @@ impl SessionManager {
         }
     }
 
-    /// 刷新 session
+    /// Refresh session
     pub async fn refresh_session(&self, token: &str) -> bool {
         let mut sessions = self.sessions.write().await;
 
@@ -707,13 +707,13 @@ impl SessionManager {
         }
     }
 
-    /// 删除 session
+    /// Delete session
     pub async fn delete_session(&self, token: &str) {
         let mut sessions = self.sessions.write().await;
         sessions.remove(token);
     }
 
-    /// 清理过期 sessions
+    /// Clean up expired sessions
     pub async fn cleanup_expired(&self) {
         let now = chrono::Utc::now().timestamp();
         let mut sessions = self.sessions.write().await;

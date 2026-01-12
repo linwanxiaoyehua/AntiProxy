@@ -1,4 +1,4 @@
-//! API Keys 管理端点
+//! API Keys management endpoints
 
 use axum::{
     extract::{Path, State},
@@ -13,7 +13,7 @@ use crate::modules::api_keys::{
 };
 use crate::proxy::server::AppState;
 
-/// 列出所有 API Keys
+/// List all API Keys
 pub async fn list_api_keys(
     State(_state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -29,7 +29,7 @@ pub async fn list_api_keys(
     }
 }
 
-/// 创建新的 API Key
+/// Create a new API Key
 pub async fn create_api_key(
     State(_state): State<AppState>,
     Json(req): Json<CreateApiKeyRequest>,
@@ -40,11 +40,11 @@ pub async fn create_api_key(
 
     match api_keys::create_api_key(&req.name) {
         Ok(key) => {
-            // 创建时返回完整的 key（只有这一次机会看到完整 key）
+            // Return the full key on creation (this is the only chance to see the full key)
             Ok((StatusCode::CREATED, Json(CreatedApiKeyResponse {
                 id: key.id,
                 name: key.name,
-                key: key.key, // 完整 key，只在创建时返回
+                key: key.key, // Full key, only returned on creation
                 created_at: key.created_at,
             })))
         }
@@ -63,7 +63,7 @@ pub struct CreatedApiKeyResponse {
     pub created_at: i64,
 }
 
-/// 获取单个 API Key
+/// Get a single API Key
 pub async fn get_api_key(
     State(_state): State<AppState>,
     Path(id): Path<String>,
@@ -78,20 +78,20 @@ pub async fn get_api_key(
     }
 }
 
-/// 更新 API Key 请求
+/// Update API Key request
 #[derive(Deserialize)]
 pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
     pub enabled: Option<bool>,
 }
 
-/// 更新 API Key
+/// Update API Key
 pub async fn update_api_key(
     State(_state): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<UpdateApiKeyRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // 检查 key 是否存在
+    // Check if key exists
     match api_keys::get_api_key(&id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(StatusCode::NOT_FOUND),
@@ -101,7 +101,7 @@ pub async fn update_api_key(
         }
     }
 
-    // 更新名称
+    // Update name
     if let Some(name) = req.name {
         if !name.trim().is_empty() {
             if let Err(e) = api_keys::update_api_key_name(&id, &name) {
@@ -111,7 +111,7 @@ pub async fn update_api_key(
         }
     }
 
-    // 更新启用状态
+    // Update enabled state
     if let Some(enabled) = req.enabled {
         if let Err(e) = api_keys::set_api_key_enabled(&id, enabled) {
             tracing::error!("Failed to update API key enabled state: {}", e);
@@ -119,7 +119,7 @@ pub async fn update_api_key(
         }
     }
 
-    // 返回更新后的 key
+    // Return the updated key
     match api_keys::get_api_key(&id) {
         Ok(Some(key)) => Ok(Json(ApiKeyResponse::from(key))),
         Ok(None) => Err(StatusCode::NOT_FOUND),
@@ -130,12 +130,12 @@ pub async fn update_api_key(
     }
 }
 
-/// 删除 API Key
+/// Delete API Key
 pub async fn delete_api_key(
     State(_state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // 检查 key 是否存在
+    // Check if key exists
     match api_keys::get_api_key(&id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(StatusCode::NOT_FOUND),
@@ -154,12 +154,12 @@ pub async fn delete_api_key(
     }
 }
 
-/// 重新生成 API Key
+/// Regenerate API Key
 pub async fn regenerate_api_key(
     State(_state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // 检查 key 是否存在
+    // Check if key exists
     match api_keys::get_api_key(&id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(StatusCode::NOT_FOUND),
@@ -183,12 +183,12 @@ pub struct RegeneratedKeyResponse {
     pub key: String,
 }
 
-/// 重置 API Key 用量统计
+/// Reset API Key usage statistics
 pub async fn reset_api_key_usage(
     State(_state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // 检查 key 是否存在
+    // Check if key exists
     match api_keys::get_api_key(&id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(StatusCode::NOT_FOUND),
@@ -200,7 +200,7 @@ pub async fn reset_api_key_usage(
 
     match api_keys::reset_usage(&id) {
         Ok(()) => {
-            // 返回更新后的 key
+            // Return the updated key
             match api_keys::get_api_key(&id) {
                 Ok(Some(key)) => Ok(Json(ApiKeyResponse::from(key))),
                 Ok(None) => Err(StatusCode::NOT_FOUND),
@@ -217,7 +217,7 @@ pub async fn reset_api_key_usage(
     }
 }
 
-/// 获取总用量统计
+/// Get total usage statistics
 pub async fn get_total_usage(
     State(_state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {

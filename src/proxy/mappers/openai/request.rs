@@ -1,10 +1,10 @@
-// OpenAI → Gemini 请求转换
+// OpenAI → Gemini request transformation
 use super::models::*;
 use serde_json::{json, Value};
 use super::streaming::get_thought_signature;
 
 pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mapped_model: &str) -> Value {
-    // 将 OpenAI 工具转为 Value 数组以便探测
+    // Convert OpenAI tools to Value array for inspection
     let tools_val = request.tools.as_ref().map(|list| {
         list.iter().map(|v| v.clone()).collect::<Vec<_>>()
     });
@@ -15,7 +15,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     tracing::debug!("[Debug] OpenAI Request: original='{}', mapped='{}', type='{}', has_image_config={}", 
         request.model, mapped_model, config.request_type, config.image_config.is_some());
     
-    // 1. 提取所有 System Message 并注入补丁
+    // 1. Extract all System Messages and inject patches
     let _system_instructions: Vec<String> = request.messages.iter()
         .filter(|msg| msg.role == "system")
         .filter_map(|msg| {
@@ -48,13 +48,13 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         }
     }
 
-    // 从全局存储获取 thoughtSignature (PR #93 支持)
+    // Get thoughtSignature from global storage (PR #93 support)
     let global_thought_sig = get_thought_signature();
     if global_thought_sig.is_some() {
-        tracing::debug!("从全局存储获取到 thoughtSignature (长度: {})", global_thought_sig.as_ref().unwrap().len());
+        tracing::debug!("Retrieved thoughtSignature from global storage (length: {})", global_thought_sig.as_ref().unwrap().len());
     }
 
-    // 2. 构建 Gemini contents (过滤掉 system)
+    // 2. Build Gemini contents (filter out system messages)
     let contents: Vec<Value> = request
         .messages
         .iter()
@@ -98,9 +98,9 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                                             "fileData": { "fileUri": &image_url.url, "mimeType": "image/jpeg" }
                                         }));
                                     } else {
-                                        // [NEW] 处理本地文件路径 (file:// 或 Windows/Unix 路径)
+                                        // [NEW] Handle local file paths (file:// or Windows/Unix paths)
                                         let file_path = if image_url.url.starts_with("file://") {
-                                            // 移除 file:// 前缀
+                                            // Remove file:// prefix
                                             #[cfg(target_os = "windows")]
                                             { image_url.url.trim_start_matches("file:///").replace('/', "\\") }
                                             #[cfg(not(target_os = "windows"))]
@@ -111,12 +111,12 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                                         
                                         tracing::debug!("[OpenAI-Request] Reading local image: {}", file_path);
                                         
-                                        // 读取文件并转换为 base64
+                                        // Read file and convert to base64
                                         if let Ok(file_bytes) = std::fs::read(&file_path) {
                                             use base64::Engine as _;
                                             let b64 = base64::engine::general_purpose::STANDARD.encode(&file_bytes);
                                             
-                                            // 根据文件扩展名推断 MIME 类型
+                                            // Infer MIME type from file extension
                                             let mime_type = if file_path.to_lowercase().ends_with(".png") {
                                                 "image/png"
                                             } else if file_path.to_lowercase().ends_with(".gif") {
@@ -145,7 +145,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
             // Handle tool calls (assistant message)
             if let Some(tool_calls) = &msg.tool_calls {
                 for (_index, tc) in tool_calls.iter().enumerate() {
-                    /* 暂时移除：防止 Codex CLI 界面碎片化
+                    /* Temporarily removed: Prevents Codex CLI interface fragmentation
                     if index == 0 && parts.is_empty() {
                          if mapped_model.contains("gemini-3") {
                               parts.push(json!({"text": "Thinking Process: Determining necessary tool actions."}));
@@ -161,7 +161,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                         }
                     });
 
-                    // [修复] 为该消息内的所有工具调用注入 thoughtSignature (PR #114 优化)
+                    // [FIX] Inject thoughtSignature for all tool calls in this message (PR #114 optimization)
                     if let Some(ref sig) = global_thought_sig {
                         func_call_part["thoughtSignature"] = json!(sig);
                     }
@@ -195,12 +195,12 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         })
         .collect();
 
-    // [PR #合并] 合并连续相同角色的消息 (Gemini 强制要求 user/model 交替)
+    // [PR #merge] Merge consecutive messages with the same role (Gemini requires user/model alternation)
     let mut merged_contents: Vec<Value> = Vec::new();
     for msg in contents {
         if let Some(last) = merged_contents.last_mut() {
             if last["role"] == msg["role"] {
-                // 合并 parts
+                // Merge parts
                 if let (Some(last_parts), Some(msg_parts)) = (last["parts"].as_array_mut(), msg["parts"].as_array()) {
                     last_parts.extend(msg_parts.iter().cloned());
                     continue;
@@ -211,7 +211,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     }
     let contents = merged_contents;
 
-    // 3. 构建请求体
+    // 3. Build request body
     let mut gen_config = json!({
         "maxOutputTokens": request.max_tokens.unwrap_or(64000),
         "temperature": request.temperature.unwrap_or(1.0),
@@ -241,7 +241,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         ]
     });
 
-    // 深度清理 [undefined] 字符串 (Cherry Studio 等客户端常见注入)
+    // Deep clean [undefined] strings (commonly injected by clients like Cherry Studio)
     crate::proxy::mappers::common_utils::deep_clean_undefined(&mut inner_request);
 
     // 4. Handle Tools (Merged Cleaning)
@@ -261,7 +261,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
             };
 
             if let Some(name) = gemini_func.get("name").and_then(|v| v.as_str()) {
-                // 跳过内置联网工具名称，避免重复定义
+                // Skip built-in web search tool names to avoid duplicate definitions
                 if name == "web_search" || name == "google_search" || name == "web_search_20250305" {
                     continue;
                 }
@@ -273,28 +273,28 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                 }
             }
 
-            // [NEW CRITICAL FIX] 清除函数定义根层级的非法字段 (解决报错持久化)
+            // [NEW CRITICAL FIX] Remove invalid fields from function definition root level (fix persistent errors)
             if let Some(obj) = gemini_func.as_object_mut() {
                 obj.remove("format");
                 obj.remove("strict");
                 obj.remove("additionalProperties");
-                obj.remove("type"); // [NEW] Gemini 不支持在 FunctionDeclaration 根层级出现 type: "function"
+                obj.remove("type"); // [NEW] Gemini does not support type: "function" at FunctionDeclaration root level
             }
 
             if let Some(params) = gemini_func.get_mut("parameters") {
-                // [DEEP FIX] 统一调用公共库清洗：展开 $ref 并剔除所有层级的 format/definitions
+                // [DEEP FIX] Use common library for cleaning: expand $ref and remove format/definitions at all levels
                 crate::proxy::common::json_schema::clean_json_schema(params);
 
-                // Gemini v1internal 要求：
-                // 1. type 必须是大写 (OBJECT, STRING 等)
-                // 2. 根对象必须有 "type": "OBJECT"
+                // Gemini v1internal requirements:
+                // 1. type must be uppercase (OBJECT, STRING, etc.)
+                // 2. Root object must have "type": "OBJECT"
                 if let Some(params_obj) = params.as_object_mut() {
                     if !params_obj.contains_key("type") {
                         params_obj.insert("type".to_string(), json!("OBJECT"));
                     }
                 }
                 
-                // 递归转换 type 为大写 (符合 Protobuf 定义)
+                // Recursively convert type to uppercase (conform to Protobuf definition)
                 enforce_uppercase_types(params);
             }
             function_declarations.push(gemini_func);

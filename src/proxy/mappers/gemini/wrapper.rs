@@ -1,29 +1,29 @@
-// Gemini v1internal 包装/解包
+// Gemini v1internal wrapping/unwrapping
 use serde_json::{json, Value};
 
-/// 包装请求体为 v1internal 格式
+/// Wrap request body into v1internal format
 pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value {
-    // 优先使用传入的 mapped_model，其次尝试从 body 获取
+    // Prefer the passed mapped_model, otherwise try to get from body
     let original_model = body.get("model").and_then(|v| v.as_str()).unwrap_or(mapped_model);
     
-    // 如果 mapped_model 是空的，则使用 original_model
+    // If mapped_model is empty, use original_model
     let final_model_name = if !mapped_model.is_empty() {
         mapped_model
     } else {
         original_model
     };
 
-    // 复制 body 以便修改
+    // Clone body for modification
     let mut inner_request = body.clone();
 
-    // 深度清理 [undefined] 字符串 (Cherry Studio 等客户端常见注入)
+    // Deep clean [undefined] strings (commonly injected by clients like Cherry Studio)
     crate::proxy::mappers::common_utils::deep_clean_undefined(&mut inner_request);
 
     // [FIX] Removed forced maxOutputTokens (64000) as it exceeds limits for Gemini 1.5 Flash/Pro standard models (8192).
     // This caused upstream to return empty/invalid responses, leading to 'NoneType' object has no attribute 'strip' in Python clients.
     // relying on upstream defaults or user provided values is safer.
 
-    // 提取 tools 列表以进行联网探测 (Gemini 风格可能是嵌套的)
+    // Extract tools list for grounding detection (Gemini style may be nested)
     let tools_val: Option<Vec<Value>> = inner_request.get("tools").and_then(|t| t.as_array()).map(|arr| {
         arr.clone()
     });
@@ -37,7 +37,7 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
             for tool in tools_arr {
                 if let Some(decls) = tool.get_mut("functionDeclarations") {
                     if let Some(decls_arr) = decls.as_array_mut() {
-                        // 1. 过滤掉联网关键字函数
+                        // 1. Filter out web search keyword functions
                         decls_arr.retain(|decl| {
                             if let Some(name) = decl.get("name").and_then(|v| v.as_str()) {
                                 if name == "web_search" || name == "google_search" {
@@ -47,7 +47,7 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
                             true
                         });
 
-                        // 2. 清洗剩余 Schema
+                        // 2. Clean remaining Schema
                         for decl in decls_arr {
                             if let Some(params) = decl.get_mut("parameters") {
                                 crate::proxy::common::json_schema::clean_json_schema(params);
@@ -89,7 +89,7 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
 
     let final_request = json!({
         "project": project_id,
-        "requestId": format!("agent-{}", uuid::Uuid::new_v4()), // 修正为 agent- 前缀
+        "requestId": format!("agent-{}", uuid::Uuid::new_v4()), // Fixed to use agent- prefix
         "request": inner_request,
         "model": config.final_model,
         "userAgent": "antigravity",
@@ -99,7 +99,7 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
     final_request
 }
 
-/// 解包响应（提取 response 字段）
+/// Unwrap response (extract response field)
 pub fn unwrap_response(response: &Value) -> Value {
     response.get("response").unwrap_or(response).clone()
 }

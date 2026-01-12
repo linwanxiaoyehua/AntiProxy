@@ -1,8 +1,8 @@
 use reqwest::{Client, Proxy};
 use crate::modules::config::load_web_config;
 
-/// 创建统一配置的 HTTP 客户端
-/// 自动加载全局配置并应用代理
+/// Create a unified configured HTTP client
+/// Automatically load global configuration and apply proxy
 pub fn create_client(timeout_secs: u64) -> Client {
     if let Ok(config) = load_web_config() {
         create_client_with_proxy(timeout_secs, Some(config.upstream_proxy))
@@ -11,7 +11,7 @@ pub fn create_client(timeout_secs: u64) -> Client {
     }
 }
 
-/// 创建带指定代理配置的 HTTP 客户端
+/// Create an HTTP client with specified proxy configuration
 pub fn create_client_with_proxy(
     timeout_secs: u64, 
     proxy_config: Option<crate::proxy::config::UpstreamProxyConfig>
@@ -24,10 +24,10 @@ pub fn create_client_with_proxy(
             match Proxy::all(&config.url) {
                 Ok(proxy) => {
                     builder = builder.proxy(proxy);
-                    tracing::info!("HTTP 客户端已启用上游代理: {}", config.url);
+                    tracing::info!("HTTP client enabled upstream proxy: {}", config.url);
                 }
                 Err(e) => {
-                    tracing::error!("无效的代理地址: {}, 错误: {}", config.url, e);
+                    tracing::error!("Invalid proxy address: {}, error: {}", config.url, e);
                 }
             }
         } else {

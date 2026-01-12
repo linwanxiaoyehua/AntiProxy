@@ -1,4 +1,4 @@
-// Common 模块 - 公共工具
+// Common module - Shared utilities
 
 // pub mod error;
 // pub mod rate_limiter;

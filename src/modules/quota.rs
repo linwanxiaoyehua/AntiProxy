@@ -78,7 +78,7 @@ async fn fetch_project_id(access_token: &str, email: &str) -> (Option<String>, O
 
                     if let Some(ref tier) = subscription_tier {
                         crate::modules::logger::log_info(&format!(
-                            "📊 [{}] 订阅识别成功: {}",
+                            "📊 [{}] Subscription identified: {}",
                             email, tier
                         ));
                     }
@@ -87,7 +87,7 @@ async fn fetch_project_id(access_token: &str, email: &str) -> (Option<String>, O
                 }
             } else {
                 crate::modules::logger::log_warn(&format!(
-                    "⚠️  [{}] loadCodeAssist 失败: Status: {}",
+                    "⚠️  [{}] loadCodeAssist failed: Status: {}",
                     email,
                     res.status()
                 ));
@@ -95,7 +95,7 @@ async fn fetch_project_id(access_token: &str, email: &str) -> (Option<String>, O
         }
         Err(e) => {
             crate::modules::logger::log_error(&format!(
-                "❌ [{}] loadCodeAssist 网络错误: {}",
+                "❌ [{}] loadCodeAssist network error: {}",
                 email, e
             ));
         }
@@ -144,7 +144,7 @@ pub async fn fetch_quota_inner(
 
                     if status == reqwest::StatusCode::FORBIDDEN {
                         crate::modules::logger::log_warn(
-                            "账号无权限 (403 Forbidden),标记为 forbidden 状态",
+                            "Account has no permission (403 Forbidden), marking as forbidden status",
                         );
                         let mut q = QuotaData::new();
                         q.is_forbidden = true;
@@ -155,7 +155,7 @@ pub async fn fetch_quota_inner(
                     if attempt < max_retries {
                         let text = response.text().await.unwrap_or_default();
                         crate::modules::logger::log_warn(&format!(
-                            "API 错误: {} - {} (尝试 {}/{})",
+                            "API error: {} - {} (attempt {}/{})",
                             status, text, attempt, max_retries
                         ));
                         last_error = Some(AppError::Unknown(format!(
@@ -167,7 +167,7 @@ pub async fn fetch_quota_inner(
                     } else {
                         let text = response.text().await.unwrap_or_default();
                         return Err(AppError::Unknown(format!(
-                            "API 错误: {} - {}",
+                            "API error: {} - {}",
                             status, text
                         )));
                     }
@@ -178,7 +178,7 @@ pub async fn fetch_quota_inner(
 
                 let mut quota_data = QuotaData::new();
 
-                tracing::debug!("Quota API 返回了 {} 个模型", quota_response.models.len());
+                tracing::debug!("Quota API returned {} models", quota_response.models.len());
 
                 for (name, info) in quota_response.models {
                     if let Some(quota_info) = info.quota_info {
@@ -201,7 +201,7 @@ pub async fn fetch_quota_inner(
             }
             Err(e) => {
                 crate::modules::logger::log_warn(&format!(
-                    "请求失败: {} (尝试 {}/{})",
+                    "Request failed: {} (attempt {}/{})",
                     e, attempt, max_retries
                 ));
                 last_error = Some(AppError::Network(e));
@@ -212,7 +212,7 @@ pub async fn fetch_quota_inner(
         }
     }
 
-    Err(last_error.unwrap_or_else(|| AppError::Unknown("配额查询失败".to_string())))
+    Err(last_error.unwrap_or_else(|| AppError::Unknown("Quota query failed".to_string())))
 }
 
 #[allow(dead_code)]

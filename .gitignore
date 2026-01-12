@@ -10,3 +10,4 @@
 **/*.rs.bk
 /web_config.json
 Thumbs.db
+/.claude/

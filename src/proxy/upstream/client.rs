@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use tokio::time::Duration;
 
 // Cloud Code v1internal endpoints
-// [FIX] daily 端点优先 - sandbox 端点返回 404 已移除
+// [FIX] daily endpoint preferred - sandbox endpoint returning 404 has been removed
 const V1_INTERNAL_BASE_URL_DAILY: &str = "https://daily-cloudcode-pa.googleapis.com/v1internal";
 const V1_INTERNAL_BASE_URL_PROD: &str = "https://cloudcode-pa.googleapis.com/v1internal";
 
@@ -52,7 +52,7 @@ impl UpstreamClient {
         let http_client = builder.build().expect("Failed to create HTTP client");
 
         // Initialize with default endpoint priority
-        // [FIX] daily 端点优先，避免 429 限流
+        // [FIX] daily endpoint preferred to avoid 429 rate limiting
         let endpoints = Arc::new(RwLock::new(vec![
             V1_INTERNAL_BASE_URL_DAILY.to_string(),
             V1_INTERNAL_BASE_URL_PROD.to_string(),
@@ -79,9 +79,9 @@ impl UpstreamClient {
         }
     }
 
-    /// 构建 v1internal URL
-    /// 
-    /// 构建 API 请求地址
+    /// Build v1internal URL
+    ///
+    /// Build API request URL
     fn build_url(base_url: &str, method: &str, query_string: Option<&str>) -> String {
         if let Some(qs) = query_string {
             format!("{}:{}?{}", base_url, method, qs)
@@ -90,13 +90,13 @@ impl UpstreamClient {
         }
     }
 
-    /// 判断是否应尝试下一个端点
-    /// 
-    /// 当遇到以下错误时，尝试切换到备用端点：
-    /// - 429 Too Many Requests（限流）
-    /// - 408 Request Timeout（超时）
-    /// - 404 Not Found（端点不存在）
-    /// - 5xx Server Error（服务器错误）
+    /// Determine whether to try the next endpoint
+    ///
+    /// When encountering the following errors, try switching to a fallback endpoint:
+    /// - 429 Too Many Requests (rate limiting)
+    /// - 408 Request Timeout (timeout)
+    /// - 404 Not Found (endpoint does not exist)
+    /// - 5xx Server Error (server error)
     fn should_try_next_endpoint(status: StatusCode) -> bool {
         status == StatusCode::TOO_MANY_REQUESTS
             || status == StatusCode::REQUEST_TIMEOUT
@@ -104,10 +104,10 @@ impl UpstreamClient {
             || status.is_server_error()
     }
 
-    /// 调用 v1internal API（基础方法）
+    /// Call v1internal API (base method)
     ///
-    /// 发起基础网络请求，支持多端点自动 Fallback
-    /// 当 fallback 端点成功时，会自动将其提升为主端点
+    /// Make basic network request with multi-endpoint automatic fallback
+    /// When a fallback endpoint succeeds, it will be automatically promoted to primary
     pub async fn call_v1_internal(
         &self,
         method: &str,
@@ -115,7 +115,7 @@ impl UpstreamClient {
         body: Value,
         query_string: Option<&str>,
     ) -> Result<Response, String> {
-        // 构建 Headers (所有端点复用)
+        // Build Headers (reused across all endpoints)
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
@@ -138,7 +138,7 @@ impl UpstreamClient {
         let endpoints = self.endpoints.read().await.clone();
         let endpoint_count = endpoints.len();
 
-        // 遍历所有端点，失败时自动切换
+        // Iterate through all endpoints, automatically switch on failure
         for (idx, base_url) in endpoints.iter().enumerate() {
             let url = Self::build_url(base_url, method, query_string);
             let has_next = idx + 1 < endpoint_count;
@@ -171,7 +171,7 @@ impl UpstreamClient {
                         return Ok(resp);
                     }
 
-                    // 如果有下一个端点且当前错误可重试，则切换
+                    // If there is a next endpoint and current error is retryable, switch
                     if has_next && Self::should_try_next_endpoint(status) {
                         tracing::warn!(
                             "Upstream endpoint returned {} at {} (method={}), trying next endpoint",
@@ -183,7 +183,7 @@ impl UpstreamClient {
                         continue;
                     }
 
-                    // 不可重试的错误或已是最后一个端点，直接返回
+                    // Non-retryable error or already the last endpoint, return directly
                     return Ok(resp);
                 }
                 Err(e) => {
@@ -191,7 +191,7 @@ impl UpstreamClient {
                     tracing::debug!("{}", msg);
                     last_err = Some(msg);
 
-                    // 如果是最后一个端点，退出循环
+                    // If this is the last endpoint, exit the loop
                     if !has_next {
                         break;
                     }
@@ -203,29 +203,29 @@ impl UpstreamClient {
         Err(last_err.unwrap_or_else(|| "All endpoints failed".to_string()))
     }
 
-    /// 调用 v1internal API（带 429 重试,支持闭包）
-    /// 
-    /// 带容错和重试的核心请求逻辑
-    /// 
+    /// Call v1internal API (with 429 retry, supports closures)
+    ///
+    /// Core request logic with fault tolerance and retry
+    ///
     /// # Arguments
     /// * `method` - API method (e.g., "generateContent")
     /// * `query_string` - Optional query string (e.g., "?alt=sse")
-    /// * `get_credentials` - 闭包，获取凭证（支持账号轮换）
-    /// * `build_body` - 闭包，接收 project_id 构建请求体
-    /// * `max_attempts` - 最大重试次数
-    /// 
+    /// * `get_credentials` - Closure to get credentials (supports account rotation)
+    /// * `build_body` - Closure that takes project_id to build request body
+    /// * `max_attempts` - Maximum retry attempts
+    ///
     /// # Returns
     /// HTTP Response
-    // 已移除弃用的重试方法 (call_v1_internal_with_retry)
+    // Deprecated retry method has been removed (call_v1_internal_with_retry)
 
-    // 已移除弃用的辅助方法 (parse_retry_delay)
+    // Deprecated helper method has been removed (parse_retry_delay)
 
-    // 已移除弃用的辅助方法 (parse_duration_ms)
+    // Deprecated helper method has been removed (parse_duration_ms)
 
-    /// 获取可用模型列表
+    /// Get available models list
     ///
-    /// 获取远端模型列表，支持多端点自动 Fallback
-    /// 当 fallback 端点成功时，会自动将其提升为主端点
+    /// Fetch remote model list with multi-endpoint automatic fallback
+    /// When a fallback endpoint succeeds, it will be automatically promoted to primary
     pub async fn fetch_available_models(&self, access_token: &str) -> Result<Value, String> {
         let mut headers = header::HeaderMap::new();
         headers.insert(
@@ -249,7 +249,7 @@ impl UpstreamClient {
         let endpoints = self.endpoints.read().await.clone();
         let endpoint_count = endpoints.len();
 
-        // 遍历所有端点，失败时自动切换
+        // Iterate through all endpoints, automatically switch on failure
         for (idx, base_url) in endpoints.iter().enumerate() {
             let url = Self::build_url(base_url, "fetchAvailableModels", None);
 
@@ -283,7 +283,7 @@ impl UpstreamClient {
                         return Ok(json);
                     }
 
-                    // 如果有下一个端点且当前错误可重试，则切换
+                    // If there is a next endpoint and current error is retryable, switch
                     let has_next = idx + 1 < endpoint_count;
                     if has_next && Self::should_try_next_endpoint(status) {
                         tracing::warn!(
@@ -295,7 +295,7 @@ impl UpstreamClient {
                         continue;
                     }
 
-                    // 不可重试的错误或已是最后一个端点
+                    // Non-retryable error or already the last endpoint
                     return Err(format!("Upstream error: {}", status));
                 }
                 Err(e) => {
@@ -303,7 +303,7 @@ impl UpstreamClient {
                     tracing::debug!("{}", msg);
                     last_err = Some(msg);
 
-                    // 如果是最后一个端点，退出循环
+                    // If this is the last endpoint, exit the loop
                     if idx + 1 >= endpoint_count {
                         break;
                     }

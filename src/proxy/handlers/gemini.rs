@@ -9,14 +9,14 @@ use crate::proxy::session_manager::SessionManager;
  
 const MAX_RETRY_ATTEMPTS: usize = 3;
  
-/// 处理 generateContent 和 streamGenerateContent
-/// 路径参数: model_name, method (e.g. "gemini-pro", "generateContent")
+/// Handle generateContent and streamGenerateContent
+/// Path parameters: model_name, method (e.g. "gemini-pro", "generateContent")
 pub async fn handle_generate(
     State(state): State<AppState>,
     Path(model_action): Path<String>,
     Json(body): Json<Value>
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // 解析 model:method
+    // Parse model:method
     let (model_name, method) = if let Some((m, action)) = model_action.rsplit_once(':') {
         (m.to_string(), action.to_string())
     } else {
@@ -25,34 +25,34 @@ pub async fn handle_generate(
 
     crate::modules::logger::log_info(&format!("Received Gemini request: {}/{}", model_name, method));
 
-    // 1. 验证方法
+    // 1. Validate method
     if method != "generateContent" && method != "streamGenerateContent" {
         return Err((StatusCode::BAD_REQUEST, format!("Unsupported method: {}", method)));
     }
     let is_stream = method == "streamGenerateContent";
 
-    // 2. 获取 UpstreamClient 和 TokenManager
+    // 2. Get UpstreamClient and TokenManager
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager;
     let pool_size = token_manager.len();
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
 
-    // [CRITICAL FIX] 提前计算 session_id，确保重试时不会改变
+    // [CRITICAL FIX] Pre-calculate session_id to ensure it doesn't change on retry
     let stable_session_id = SessionManager::extract_gemini_session_id(&body, &model_name);
 
     let mut last_error = String::new();
-    let mut force_rotate_next = false;  // 控制下一次循环是否轮换账号
+    let mut force_rotate_next = false;  // Control whether to rotate account on next iteration
 
     for attempt in 0..max_attempts {
-        // 3. 模型路由与配置解析
+        // 3. Model routing and configuration parsing
         let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
             &model_name,
             &*state.custom_mapping.read().await,
             &*state.openai_mapping.read().await,
             &*state.anthropic_mapping.read().await,
-            false,  // Gemini 请求不应用 Claude 家族映射
+            false,  // Gemini requests don't apply Claude family mapping
         );
-        // 提取 tools 列表以进行联网探测 (Gemini 风格可能是嵌套的)
+        // Extract tools list for web search detection (Gemini style may be nested)
         let tools_val: Option<Vec<Value>> = body.get("tools").and_then(|t| t.as_array()).map(|arr| {
             let mut flattened = Vec::new();
             for tool_entry in arr {
@@ -67,7 +67,7 @@ pub async fn handle_generate(
 
         let config = crate::proxy::mappers::common_utils::resolve_request_config(&model_name, &mapped_model, &tools_val);
 
-        // 4. 获取 Token (使用预计算的 session_id 和 force_rotate_next)
+        // 4. Get Token (using pre-calculated session_id and force_rotate_next)
         let quota_group = "gemini";
         let selected = match token_manager
             .get_token(quota_group, &config.request_type, force_rotate_next, Some(&stable_session_id))
@@ -86,10 +86,10 @@ pub async fn handle_generate(
 
         info!("✓ Using account: {} (type: {})", email, config.request_type);
 
-        // 5. 包装请求 (project injection)
+        // 5. Wrap request (project injection)
         let wrapped_body = wrap_request(&body, &project_id, &mapped_model);
 
-        // 5. 上游调用
+        // 5. Upstream call
         let query_string = if is_stream { Some("alt=sse") } else { None };
         let upstream_method = if is_stream { "streamGenerateContent" } else { "generateContent" };
 
@@ -106,7 +106,7 @@ pub async fn handle_generate(
 
         let status = response.status();
         if status.is_success() {
-            // 6. 响应处理
+            // 6. Response handling
             if is_stream {
                 use axum::body::Body;
                 use axum::response::Response;
@@ -188,27 +188,27 @@ pub async fn handle_generate(
             return Ok(Json(unwrapped).into_response());
         }
 
-        // 处理错误并重试
+        // Handle error and retry
         let status_code = status.as_u16();
         let retry_after = response.headers().get("Retry-After").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
         let error_text = response.text().await.unwrap_or_else(|_| format!("HTTP {}", status_code));
         last_error = format!("HTTP {}: {}", status_code, error_text);
 
-        // 判断是否应该轮换账号
+        // Determine whether to rotate account
         fn should_rotate_account(status_code: u16) -> bool {
             match status_code {
-                // 这些错误是账号级别的，需要轮换
+                // These errors are account-level, require rotation
                 429 | 401 | 403 | 500 => true,
-                // 这些错误是服务端级别的，轮换账号无意义
+                // These errors are server-level, rotating account is meaningless
                 400 | 503 | 529 => false,
-                // 其他错误默认不轮换
+                // Other errors default to no rotation
                 _ => false,
             }
         }
 
-        // 只有 429 (限流), 529 (过载), 503, 403 (权限) 和 401 (认证失效) 触发重试
+        // Only 429 (rate limit), 529 (overload), 503, 403 (permission) and 401 (auth failure) trigger retry
         if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 || status_code == 403 || status_code == 401 {
-            // 记录限流信息 (全局同步)
+            // Record rate limit info (global sync)
             token_manager.mark_rate_limited(
                 quota_group,
                 &config.request_type,
@@ -218,7 +218,7 @@ pub async fn handle_generate(
                 &error_text,
             );
 
-            // 根据错误类型决定是否轮换账号
+            // Determine whether to rotate account based on error type
             force_rotate_next = should_rotate_account(status_code);
             tracing::warn!(
                 "Gemini Upstream {} on account {}, will rotate: {}",
@@ -227,7 +227,7 @@ pub async fn handle_generate(
             continue;
         }
 
-        // 404 等由于模型配置或路径错误的 HTTP 异常，直接报错，不进行无效轮换
+        // 404 etc. HTTP errors due to model config or path errors, return error directly without invalid rotation
         error!("Gemini Upstream non-retryable error {}: {}", status_code, error_text);
         return Err((status, error_text));
     }
@@ -238,14 +238,14 @@ pub async fn handle_generate(
 pub async fn handle_list_models(State(state): State<AppState>) -> Result<impl IntoResponse, (StatusCode, String)> {
     use crate::proxy::common::model_mapping::get_all_dynamic_models;
 
-    // 获取所有动态模型列表（与 /v1/models 一致）
+    // Get all dynamic model list (consistent with /v1/models)
     let model_ids = get_all_dynamic_models(
         &state.openai_mapping,
         &state.custom_mapping,
         &state.anthropic_mapping,
     ).await;
 
-    // 转换为 Gemini API 格式
+    // Convert to Gemini API format
     let models: Vec<_> = model_ids.into_iter().map(|id| {
         json!({
             "name": format!("models/{}", id),

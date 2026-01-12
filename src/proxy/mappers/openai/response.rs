@@ -2,10 +2,10 @@ use super::models::*;
 use serde_json::Value;
 
 pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
-    // 解包 response 字段
+    // Unwrap response field
     let raw = gemini_response.get("response").unwrap_or(gemini_response);
 
-    // 提取 content 和 tool_calls
+    // Extract content and tool_calls
     let mut content_out = String::new();
     let mut tool_calls = Vec::new();
 
@@ -17,7 +17,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
         .and_then(|p| p.as_array())
     {
         for part in parts {
-            /* 暂时禁用：思维链/推理部分 (Gemini 2.0+) 避免干扰 Codex CLI 等非推理客户端
+            /* Temporarily disabled: Thinking/reasoning section (Gemini 2.0+) to avoid interfering with non-reasoning clients like Codex CLI
             if let Some(thought) = part.get("thought").and_then(|t| t.as_str()) {
                 if !thought.is_empty() {
                     content_out.push_str("<thought>\n");
@@ -27,7 +27,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
             }
             */
 
-            // 捕获 thoughtSignature (Gemini 3 工具调用必需)
+            // Capture thoughtSignature (required for Gemini 3 tool calls)
             if let Some(sig) = part
                 .get("thoughtSignature")
                 .or(part.get("thought_signature"))
@@ -36,12 +36,12 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                 super::streaming::store_thought_signature(sig);
             }
 
-            // 文本部分
+            // Text part
             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                 content_out.push_str(text);
             }
 
-            // 工具调用部分
+            // Tool call part
             if let Some(fc) = part.get("functionCall") {
                 let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
                 let args = fc
@@ -64,7 +64,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                 });
             }
 
-            // 图片处理
+            // Image processing
             if let Some(img) = part.get("inlineData") {
                 let mime_type = img
                     .get("mimeType")
@@ -78,7 +78,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
         }
     }
 
-    // 提取并处理联网搜索引文 (Grounding Metadata)
+    // Extract and process web search citations (Grounding Metadata)
     if let Some(grounding) = raw
         .get("candidates")
         .and_then(|c| c.get(0))
@@ -86,16 +86,16 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
     {
         let mut grounding_text = String::new();
 
-        // 1. 处理搜索词
+        // 1. Process search queries
         if let Some(queries) = grounding.get("webSearchQueries").and_then(|q| q.as_array()) {
             let query_list: Vec<&str> = queries.iter().filter_map(|v| v.as_str()).collect();
             if !query_list.is_empty() {
-                grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
+                grounding_text.push_str("\n\n---\n**🔍 Searched for you:** ");
                 grounding_text.push_str(&query_list.join(", "));
             }
         }
 
-        // 2. 处理来源链接 (Chunks)
+        // 2. Process source links (Chunks)
         if let Some(chunks) = grounding.get("groundingChunks").and_then(|c| c.as_array()) {
             let mut links = Vec::new();
             for (i, chunk) in chunks.iter().enumerate() {
@@ -103,14 +103,14 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                     let title = web
                         .get("title")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("网页来源");
+                        .unwrap_or("Web Source");
                     let uri = web.get("uri").and_then(|v| v.as_str()).unwrap_or("#");
                     links.push(format!("[{}] [{}]({})", i + 1, title, uri));
                 }
             }
 
             if !links.is_empty() {
-                grounding_text.push_str("\n\n**🌐 来源引文：**\n");
+                grounding_text.push_str("\n\n**🌐 Source Citations:**\n");
                 grounding_text.push_str(&links.join("\n"));
             }
         }
@@ -120,7 +120,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
         }
     }
 
-    // 提取 finish_reason
+    // Extract finish_reason
     let finish_reason = raw
         .get("candidates")
         .and_then(|c| c.get(0))

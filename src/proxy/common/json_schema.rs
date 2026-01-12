@@ -1,17 +1,17 @@
 use serde_json::Value;
 
-/// 递归清理 JSON Schema 以符合 Gemini 接口要求
+/// Recursively clean JSON Schema to conform to Gemini API requirements
 ///
-/// 1. [New] 展开 $ref 和 $defs: 将引用替换为实际定义，解决 Gemini 不支持 $ref 的问题
-/// 2. 移除不支持的字段: $schema, additionalProperties, format, default, uniqueItems, validation fields
-/// 3. 处理联合类型: ["string", "null"] -> "string"
-/// 4. 将 type 字段的值转换为大写 (Gemini v1internal 要求)
-/// 5. 移除数字校验字段: multipleOf, exclusiveMinimum, exclusiveMaximum 等
+/// 1. [New] Expand $ref and $defs: Replace references with actual definitions to resolve Gemini's lack of $ref support
+/// 2. Remove unsupported fields: $schema, additionalProperties, format, default, uniqueItems, validation fields
+/// 3. Handle union types: ["string", "null"] -> "string"
+/// 4. Convert type field values to lowercase (Gemini v1internal requirement)
+/// 5. Remove numeric validation fields: multipleOf, exclusiveMinimum, exclusiveMaximum, etc.
 pub fn clean_json_schema(value: &mut Value) {
-    // 0. 预处理：展开 $ref (Schema Flattening)
+    // 0. Preprocessing: Expand $ref (Schema Flattening)
     if let Value::Object(map) = value {
         let mut defs = serde_json::Map::new();
-        // 提取 $defs 或 definitions
+        // Extract $defs or definitions
         if let Some(Value::Object(d)) = map.remove("$defs") {
             defs.extend(d);
         }
@@ -20,39 +20,39 @@ pub fn clean_json_schema(value: &mut Value) {
         }
 
         if !defs.is_empty() {
-            // 递归替换引用
+            // Recursively replace references
             flatten_refs(map, &defs);
         }
     }
 
-    // 递归清理
+    // Recursive cleaning
     clean_json_schema_recursive(value);
 }
 
-/// 递归展开 $ref
+/// Recursively expand $ref
 fn flatten_refs(map: &mut serde_json::Map<String, Value>, defs: &serde_json::Map<String, Value>) {
-    // 检查并替换 $ref
+    // Check and replace $ref
     if let Some(Value::String(ref_path)) = map.remove("$ref") {
-        // 解析引用名 (例如 #/$defs/MyType -> MyType)
+        // Parse reference name (e.g., #/$defs/MyType -> MyType)
         let ref_name = ref_path.split('/').last().unwrap_or(&ref_path);
 
         if let Some(def_schema) = defs.get(ref_name) {
-            // 将定义的内容合并到当前 map
+            // Merge definition content into current map
             if let Value::Object(def_map) = def_schema {
                 for (k, v) in def_map {
-                    // 仅当当前 map 没有该 key 时才插入 (避免覆盖)
-                    // 但通常 $ref 节点不应该有其他属性
+                    // Only insert if current map doesn't have this key (avoid overwriting)
+                    // Typically $ref nodes shouldn't have other properties
                     map.entry(k.clone()).or_insert_with(|| v.clone());
                 }
 
-                // 递归处理刚刚合并进来的内容中可能包含的 $ref
-                // 注意：这里可能会无限递归如果存在循环引用，但工具定义通常是 DAG
+                // Recursively process potential $ref in the merged content
+                // Note: This may cause infinite recursion if circular references exist, but tool definitions are usually DAG
                 flatten_refs(map, defs);
             }
         }
     }
 
-    // 遍历子节点
+    // Traverse child nodes
     for (_, v) in map.iter_mut() {
         if let Value::Object(child_map) = v {
             flatten_refs(child_map, defs);
@@ -69,16 +69,16 @@ fn flatten_refs(map: &mut serde_json::Map<String, Value>, defs: &serde_json::Map
 fn clean_json_schema_recursive(value: &mut Value) {
     match value {
         Value::Object(map) => {
-            // 1. [CRITICAL] 深度递归处理：必须遍历当前对象的所有字段名对应的 Value
-            // 解决 properties/items 之外的 definitions、anyOf、allOf 等结构的清理
+            // 1. [CRITICAL] Deep recursive processing: Must traverse all field values in current object
+            // Handles cleaning of definitions, anyOf, allOf, etc. beyond properties/items
             for v in map.values_mut() {
                 clean_json_schema_recursive(v);
             }
 
-            // 2. 收集并处理校验字段 (Migration logic: 将约束降级为描述中的 Hint)
+            // 2. Collect and process validation fields (Migration logic: Downgrade constraints to hints in description)
             let mut constraints = Vec::new();
 
-            // 待迁移的约束黑名单
+            // Constraint blacklist to migrate
             let validation_fields = [
                 ("pattern", "pattern"),
                 ("minLength", "minLen"),
@@ -95,17 +95,17 @@ fn clean_json_schema_recursive(value: &mut Value) {
 
             for (field, label) in validation_fields {
                 if let Some(val) = map.remove(field) {
-                    // 仅当值是简单类型时才迁移
+                    // Only migrate if value is a simple type
                     if val.is_string() || val.is_number() || val.is_boolean() {
                         constraints.push(format!("{}: {}", label, val));
                     } else {
-                        // [FIX] 如果不是简单类型（可能是同名属性），则放回
+                        // [FIX] If not a simple type (may be a property with same name), put it back
                         map.insert(field.to_string(), val);
                     }
                 }
             }
 
-            // 3. 将约束信息追加到描述
+            // 3. Append constraint info to description
             if !constraints.is_empty() {
                 let suffix = format!(" [Constraint: {}]", constraints.join(", "));
                 let desc_val = map
@@ -116,7 +116,7 @@ fn clean_json_schema_recursive(value: &mut Value) {
                 }
             }
 
-            // 4. 彻底物理移除干扰生成的"硬项"黑色名单 (Hard Blacklist)
+            // 4. Physically remove interfering "hard" blacklist fields (Hard Blacklist)
             let hard_remove_fields = [
                 "$schema",
                 "$id", // [NEW] JSON Schema identifier
@@ -149,8 +149,8 @@ fn clean_json_schema_recursive(value: &mut Value) {
                 map.remove(field);
             }
 
-            // [NEW FIX] 确保 required 中的字段一定在 properties 中存在
-            // Gemini 严格校验：required 中的字段如果不在 properties 中定义，会报 INVALID_ARGUMENT
+            // [NEW FIX] Ensure fields in required are present in properties
+            // Gemini strict validation: Fields in required that are not defined in properties will throw INVALID_ARGUMENT
             // Refactored to avoid double borrow (mutable map vs immutable get("properties"))
             let valid_prop_keys: Option<std::collections::HashSet<String>> = map
                 .get("properties")
@@ -168,13 +168,13 @@ fn clean_json_schema_recursive(value: &mut Value) {
                             }
                         });
                     } else {
-                        // 如果没有 properties，required 应该是空的
+                        // If no properties exist, required should be empty
                         req_arr.clear();
                     }
                 }
             }
 
-            // 5. 处理 type 字段 (Gemini 要求单字符串且小写)
+            // 5. Handle type field (Gemini requires single string and lowercase)
             if let Some(type_val) = map.get_mut("type") {
                 match type_val {
                     Value::String(s) => {
@@ -221,7 +221,7 @@ mod tests {
                     "minLength": 1,
                     "format": "city"
                 },
-                // 模拟属性名冲突：pattern 是一个 Object 属性，不应被移除
+                // Simulate property name conflict: pattern is an Object property, should not be removed
                 "pattern": {
                     "type": "object",
                     "properties": {
@@ -238,22 +238,22 @@ mod tests {
 
         clean_json_schema(&mut schema);
 
-        // 1. 验证类型保持小写
+        // 1. Verify type remains lowercase
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["location"]["type"], "string");
 
-        // 2. 验证标准字段被转换并移动到描述 (Advanced Soft-Remove)
+        // 2. Verify standard fields are converted and moved to description (Advanced Soft-Remove)
         assert!(schema["properties"]["location"].get("minLength").is_none());
         assert!(schema["properties"]["location"]["description"]
             .as_str()
             .unwrap()
             .contains("minLen: 1"));
 
-        // 3. 验证名为 "pattern" 的属性未被误删
+        // 3. Verify property named "pattern" was not mistakenly deleted
         assert!(schema["properties"].get("pattern").is_some());
         assert_eq!(schema["properties"]["pattern"]["type"], "object");
 
-        // 4. 验证内部的 pattern 校验字段被正确移除并转为描述
+        // 4. Verify internal pattern validation field was correctly removed and converted to description
         assert!(schema["properties"]["pattern"]["properties"]["regex"]
             .get("pattern")
             .is_none());
@@ -264,10 +264,10 @@ mod tests {
                 .contains("pattern: \"^[a-z]+$\"")
         );
 
-        // 5. 验证联合类型被降级为单一类型 (Protobuf 兼容性)
+        // 5. Verify union types are downgraded to single type (Protobuf compatibility)
         assert_eq!(schema["properties"]["unit"]["type"], "string");
 
-        // 6. 验证元数据字段被移除
+        // 6. Verify metadata fields are removed
         assert!(schema.get("$schema").is_none());
     }
 
@@ -302,7 +302,7 @@ mod tests {
 
         clean_json_schema(&mut schema);
 
-        // 验证引用被展开且类型转为小写
+        // Verify references are expanded and types are converted to lowercase
         assert_eq!(schema["properties"]["home"]["type"], "object");
         assert_eq!(
             schema["properties"]["home"]["properties"]["city"]["type"],
@@ -322,7 +322,7 @@ mod tests {
 
         clean_json_schema(&mut schema);
 
-        // 验证 missing_prop 被从 required 中移除
+        // Verify missing_prop was removed from required
         let required = schema["required"].as_array().unwrap();
         assert_eq!(required.len(), 1);
         assert_eq!(required[0].as_str().unwrap(), "existing_prop");

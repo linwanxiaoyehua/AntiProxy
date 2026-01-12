@@ -1,22 +1,22 @@
-// proxy 模块 - API 反代服务
+// proxy module - API reverse proxy service
 
-// 现有模块 (保留)
+// Existing modules (retained)
 pub mod config;
 pub mod token_manager;
 pub mod project_resolver;
 pub mod server;
 pub mod security;
 
-// 新架构模块
-pub mod mappers;           // 协议转换器
-pub mod handlers;          // API 端点处理器
-pub mod middleware;        // Axum 中间件
-pub mod upstream;          // 上游客户端
-pub mod common;            // 公共工具
-pub mod monitor;           // 监控
-pub mod rate_limit;        // 限流跟踪
-pub mod sticky_config;     // 粘性调度配置
-pub mod session_manager;   // 会话指纹管理
+// New architecture modules
+pub mod mappers;           // Protocol converters
+pub mod handlers;          // API endpoint handlers
+pub mod middleware;        // Axum middleware
+pub mod upstream;          // Upstream client
+pub mod common;            // Common utilities
+pub mod monitor;           // Monitoring
+pub mod rate_limit;        // Rate limit tracking
+pub mod sticky_config;     // Sticky scheduling configuration
+pub mod session_manager;   // Session fingerprint management
 
 
 pub use config::ProxyConfig;

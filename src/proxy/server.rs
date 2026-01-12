@@ -22,7 +22,7 @@ pub struct OAuthStatus {
     pub auth_url: Option<String>,
 }
 
-/// Axum 应用状态
+/// Axum application state
 #[derive(Clone)]
 pub struct AppState {
     pub token_manager: Arc<TokenManager>,
@@ -30,22 +30,22 @@ pub struct AppState {
     pub openai_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
     pub custom_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
     #[allow(dead_code)]
-    pub request_timeout: u64, // API 请求超时(秒)
+    pub request_timeout: u64, // API request timeout (seconds)
     pub bind_port: u16,
     pub oauth_state: Arc<tokio::sync::Mutex<OAuthStatus>>,
     #[allow(dead_code)]
-    pub thought_signature_map: Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>, // 思维链签名映射 (ID -> Signature)
+    pub thought_signature_map: Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>, // Chain-of-thought signature mapping (ID -> Signature)
     #[allow(dead_code)]
     pub upstream_proxy: Arc<tokio::sync::RwLock<crate::proxy::config::UpstreamProxyConfig>>,
     pub upstream: Arc<crate::proxy::upstream::client::UpstreamClient>,
     pub monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
-    /// WebAuthn (Passkey) 管理器
+    /// WebAuthn (Passkey) manager
     pub webauthn_manager: Arc<crate::modules::webauthn::WebAuthnManager>,
-    /// Session 管理器
+    /// Session manager
     pub session_manager: Arc<crate::modules::webauthn::SessionManager>,
 }
 
-/// Axum 服务器实例
+/// Axum server instance
 pub struct AxumServer {
     shutdown_tx: Option<oneshot::Sender<()>>,
     anthropic_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
@@ -69,23 +69,23 @@ impl AxumServer {
             let mut m = self.custom_mapping.write().await;
             *m = config.custom_mapping.clone();
         }
-        tracing::debug!("模型映射 (Anthropic/OpenAI/Custom) 已全量热更新");
+        tracing::debug!("Model mappings (Anthropic/OpenAI/Custom) fully hot-reloaded");
     }
 
-    /// 更新代理配置
+    /// Update proxy configuration
     pub async fn update_proxy(&self, new_config: crate::proxy::config::UpstreamProxyConfig) {
         let mut proxy = self.proxy_state.write().await;
         *proxy = new_config;
-        tracing::info!("上游代理配置已热更新");
+        tracing::info!("Upstream proxy configuration hot-reloaded");
     }
 
     pub async fn update_security(&self, config: &crate::proxy::config::ProxyConfig) {
         let mut sec = self.security_state.write().await;
         *sec = crate::proxy::ProxySecurityConfig::from_proxy_config(config);
-        tracing::info!("反代服务安全配置已热更新");
+        tracing::info!("Reverse proxy security configuration hot-reloaded");
     }
 
-    /// 启动 Axum 服务器
+    /// Start Axum server
     pub async fn start(
         host: String,
         port: u16,
@@ -111,7 +111,7 @@ impl AxumServer {
             auth_url: None,
         }));
 
-        // 初始化 WebAuthn 管理器
+        // Initialize WebAuthn manager
         let data_dir = crate::modules::account::get_data_dir()
             .map_err(|e| format!("Failed to get data dir: {}", e))?;
         let webauthn_manager = Arc::new(crate::modules::webauthn::WebAuthnManager::new(data_dir));
@@ -120,7 +120,7 @@ impl AxumServer {
         webauthn_manager.load_auth_config().await
             .map_err(|e| format!("Failed to load auth config: {}", e))?;
 
-        // 初始化 Session 管理器 (7天有效期)
+        // Initialize Session manager (7-day validity)
         let session_manager = Arc::new(crate::modules::webauthn::SessionManager::new(24 * 7));
 
         let state = AppState {
@@ -128,7 +128,7 @@ impl AxumServer {
             anthropic_mapping: mapping_state.clone(),
             openai_mapping: openai_mapping_state.clone(),
             custom_mapping: custom_mapping_state.clone(),
-            request_timeout: 300, // 5分钟超时
+            request_timeout: 300, // 5-minute timeout
             bind_port: port,
             oauth_state: oauth_state.clone(),
             thought_signature_map: Arc::new(tokio::sync::Mutex::new(
@@ -144,9 +144,9 @@ impl AxumServer {
         };
 
 
-        // 构建路由 - 使用新架构的 handlers！
+        // Build routes - using new architecture handlers!
         use crate::proxy::handlers;
-        // 构建路由
+        // Build routes
         let static_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("web");
 
         let app = Router::new()
@@ -212,15 +212,15 @@ impl AxumServer {
                 "/v1/completions",
                 post(handlers::openai::handle_completions),
             )
-            .route("/v1/responses", post(handlers::openai::handle_completions)) // 兼容 Codex CLI
+            .route("/v1/responses", post(handlers::openai::handle_completions)) // Compatible with Codex CLI
             .route(
                 "/v1/images/generations",
                 post(handlers::openai::handle_images_generations),
-            ) // 图像生成 API
+            ) // Image generation API
             .route(
                 "/v1/images/edits",
                 post(handlers::openai::handle_images_edits),
-            ) // 图像编辑 API
+            ) // Image editing API
             // Claude Protocol
             .route("/v1/messages", post(handlers::claude::handle_messages))
             .route(
@@ -249,8 +249,8 @@ impl AxumServer {
             .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
             .layer(axum::middleware::from_fn_with_state(state.clone(), crate::proxy::middleware::web_auth_middleware))
             .layer(crate::proxy::middleware::cors_layer())
-            // monitor_middleware 必须在 auth_middleware 之后执行（即在 layer 中位于其上方）
-            // 这样 AuthenticatedKey 才能在 monitor_middleware 中被访问
+            // monitor_middleware must execute after auth_middleware (i.e., placed above it in the layer stack)
+            // so that AuthenticatedKey can be accessed in monitor_middleware
             .layer(axum::middleware::from_fn_with_state(state.clone(), crate::proxy::middleware::monitor::monitor_middleware))
             .layer(TraceLayer::new_for_http())
             .layer(axum::middleware::from_fn_with_state(
@@ -260,15 +260,15 @@ impl AxumServer {
             .with_state(state)
             .fallback_service(ServeDir::new(static_dir).append_index_html_on_directories(true));
 
-        // 绑定地址
+        // Bind address
         let addr = format!("{}:{}", host, port);
         let listener = tokio::net::TcpListener::bind(&addr)
             .await
-            .map_err(|e| format!("地址 {} 绑定失败: {}", addr, e))?;
+            .map_err(|e| format!("Failed to bind address {}: {}", addr, e))?;
 
-        tracing::info!("反代服务器启动在 http://{}", addr);
+        tracing::info!("Reverse proxy server started at http://{}", addr);
 
-        // 创建关闭通道
+        // Create shutdown channel
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
 
         let server_instance = Self {
@@ -280,7 +280,7 @@ impl AxumServer {
             security_state,
         };
 
-        // 在新任务中启动服务器
+        // Start server in a new task
         let handle = tokio::spawn(async move {
             use hyper::server::conn::http1;
             use hyper_util::rt::TokioIo;
@@ -297,20 +297,20 @@ impl AxumServer {
                                 tokio::task::spawn(async move {
                                     if let Err(err) = http1::Builder::new()
                                         .serve_connection(io, service)
-                                        .with_upgrades() // 支持 WebSocket (如果以后需要)
+                                        .with_upgrades() // Support WebSocket (if needed in the future)
                                         .await
                                     {
-                                        debug!("连接处理结束或出错: {:?}", err);
+                                        debug!("Connection handling ended or error: {:?}", err);
                                     }
                                 });
                             }
                             Err(e) => {
-                                error!("接收连接失败: {:?}", e);
+                                error!("Failed to accept connection: {:?}", e);
                             }
                         }
                     }
                     _ = &mut shutdown_rx => {
-                        tracing::info!("反代服务器停止监听");
+                        tracing::info!("Reverse proxy server stopped listening");
                         break;
                     }
                 }
@@ -320,7 +320,7 @@ impl AxumServer {
         Ok((server_instance, handle))
     }
 
-    /// 停止服务器
+    /// Stop the server
     pub fn stop(mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
@@ -328,9 +328,9 @@ impl AxumServer {
     }
 }
 
-// ===== API 处理器 (旧代码已移除，由 src/proxy/handlers/* 接管) =====
+// ===== API handlers (legacy code removed, now handled by src/proxy/handlers/*) =====
 
-/// 健康检查处理器
+/// Health check handler
 async fn health_check_handler() -> Response {
     Json(serde_json::json!({
         "status": "ok"
@@ -338,7 +338,7 @@ async fn health_check_handler() -> Response {
     .into_response()
 }
 
-/// 静默成功处理器 (用于拦截遥测日志等)
+/// Silent success handler (used for intercepting telemetry logs, etc.)
 async fn silent_ok_handler() -> Response {
     StatusCode::OK.into_response()
 }

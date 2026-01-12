@@ -1,5 +1,5 @@
-// Claude 非流式响应转换 (Gemini → Claude)
-// 对应 NonStreamingProcessor
+// Claude non-streaming response transformation (Gemini → Claude)
+// Corresponds to NonStreamingProcessor
 
 use super::models::*;
 use super::utils::to_claude_usage;
@@ -41,7 +41,7 @@ fn remap_function_call_args(tool_name: &str, args: &mut serde_json::Value) {
     }
 }
 
-/// 非流式响应处理器
+/// Non-streaming response processor
 pub struct NonStreamingProcessor {
     content_blocks: Vec<ContentBlock>,
     text_builder: String,
@@ -63,9 +63,9 @@ impl NonStreamingProcessor {
         }
     }
 
-    /// 处理 Gemini 响应并转换为 Claude 响应
+    /// Process Gemini response and convert to Claude response
     pub fn process(&mut self, gemini_response: &GeminiResponse) -> ClaudeResponse {
-        // 获取 parts
+        // Get parts
         let empty_parts = vec![];
         let parts = gemini_response
             .candidates
@@ -75,23 +75,23 @@ impl NonStreamingProcessor {
             .map(|content| &content.parts)
             .unwrap_or(&empty_parts);
 
-        // 处理所有 parts
+        // Process all parts
         for part in parts {
             self.process_part(part);
         }
 
-        // 处理 grounding(web search) -> 转换为 server_tool_use / web_search_tool_result
+        // Process grounding (web search) -> convert to server_tool_use / web_search_tool_result
         if let Some(candidate) = gemini_response.candidates.as_ref().and_then(|c| c.get(0)) {
             if let Some(grounding) = &candidate.grounding_metadata {
                 self.process_grounding(grounding);
             }
         }
 
-        // 刷新剩余内容
+        // Flush remaining content
         self.flush_thinking();
         self.flush_text();
 
-        // 处理 trailingSignature (空 text 带签名)
+        // Process trailingSignature (empty text with signature)
         if let Some(signature) = self.trailing_signature.take() {
             self.content_blocks.push(ContentBlock::Thinking {
                 thinking: String::new(),
@@ -100,20 +100,20 @@ impl NonStreamingProcessor {
             });
         }
 
-        // 构建响应
+        // Build response
         self.build_response(gemini_response)
     }
 
-    /// 处理单个 part
+    /// Process a single part
     fn process_part(&mut self, part: &GeminiPart) {
         let signature = part.thought_signature.clone();
 
-        // 1. FunctionCall 处理
+        // 1. FunctionCall processing
         if let Some(fc) = &part.function_call {
             self.flush_thinking();
             self.flush_text();
 
-            // 处理 trailingSignature (B4/C3 场景)
+            // Process trailingSignature (B4/C3 scenario)
             if let Some(trailing_sig) = self.trailing_signature.take() {
                 self.content_blocks.push(ContentBlock::Thinking {
                     thinking: String::new(),
@@ -124,7 +124,7 @@ impl NonStreamingProcessor {
 
             self.has_tool_call = true;
 
-            // 生成 tool_use id
+            // Generate tool_use id
             let tool_id = fc.id.clone().unwrap_or_else(|| {
                 format!(
                     "{}-{}",
@@ -145,7 +145,7 @@ impl NonStreamingProcessor {
                 cache_control: None,
             };
 
-            // 只使用 FC 自己的签名
+            // Only use FC's own signature
             if let ContentBlock::ToolUse { signature: sig, .. } = &mut tool_use {
                 *sig = signature;
             }
@@ -154,13 +154,13 @@ impl NonStreamingProcessor {
             return;
         }
 
-        // 2. Text 处理
+        // 2. Text processing
         if let Some(text) = &part.text {
             if part.thought.unwrap_or(false) {
                 // Thinking part
                 self.flush_text();
 
-                // 处理 trailingSignature
+                // Process trailingSignature
                 if let Some(trailing_sig) = self.trailing_signature.take() {
                     self.flush_thinking();
                     self.content_blocks.push(ContentBlock::Thinking {
@@ -175,9 +175,9 @@ impl NonStreamingProcessor {
                     self.thinking_signature = signature;
                 }
             } else {
-                // 普通 Text
+                // Regular Text
                 if text.is_empty() {
-                    // 空 text 带签名 - 暂存到 trailingSignature
+                    // Empty text with signature - store as trailingSignature
                     if signature.is_some() {
                         self.trailing_signature = signature;
                     }
@@ -186,7 +186,7 @@ impl NonStreamingProcessor {
 
                 self.flush_thinking();
 
-                // 处理之前的 trailingSignature
+                // Process previous trailingSignature
                 if let Some(trailing_sig) = self.trailing_signature.take() {
                     self.flush_text();
                     self.content_blocks.push(ContentBlock::Thinking {
@@ -198,7 +198,7 @@ impl NonStreamingProcessor {
 
                 self.text_builder.push_str(text);
 
-                // 非空 text 带签名 - 立即刷新并输出空 thinking 块
+                // Non-empty text with signature - flush immediately and output empty thinking block
                 if let Some(sig) = signature {
                     self.flush_text();
                     self.content_blocks.push(ContentBlock::Thinking {
@@ -210,7 +210,7 @@ impl NonStreamingProcessor {
             }
         }
 
-        // 3. InlineData (Image) 处理
+        // 3. InlineData (Image) processing
         if let Some(img) = &part.inline_data {
             self.flush_thinking();
 
@@ -224,37 +224,37 @@ impl NonStreamingProcessor {
         }
     }
 
-    /// 处理 Grounding 元数据 (Web Search 结果)
+    /// Process Grounding metadata (Web Search results)
     fn process_grounding(&mut self, grounding: &GroundingMetadata) {
         let mut grounding_text = String::new();
 
-        // 1. 处理搜索词
+        // 1. Process search queries
         if let Some(queries) = &grounding.web_search_queries {
             if !queries.is_empty() {
-                grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
+                grounding_text.push_str("\n\n---\n**🔍 Searched for:** ");
                 grounding_text.push_str(&queries.join(", "));
             }
         }
 
-        // 2. 处理来源链接 (Chunks)
+        // 2. Process source links (Chunks)
         if let Some(chunks) = &grounding.grounding_chunks {
             let mut links = Vec::new();
             for (i, chunk) in chunks.iter().enumerate() {
                 if let Some(web) = &chunk.web {
-                    let title = web.title.as_deref().unwrap_or("网页来源");
+                    let title = web.title.as_deref().unwrap_or("Web Source");
                     let uri = web.uri.as_deref().unwrap_or("#");
                     links.push(format!("[{}] [{}]({})", i + 1, title, uri));
                 }
             }
 
             if !links.is_empty() {
-                grounding_text.push_str("\n\n**🌐 来源引文：**\n");
+                grounding_text.push_str("\n\n**🌐 Source Citations:**\n");
                 grounding_text.push_str(&links.join("\n"));
             }
         }
 
         if !grounding_text.is_empty() {
-            // 在常规内容前后刷新并插入文本
+            // Flush regular content before and after inserting text
             self.flush_thinking();
             self.flush_text();
             self.text_builder.push_str(&grounding_text);
@@ -262,7 +262,7 @@ impl NonStreamingProcessor {
         }
     }
 
-    /// 刷新 text builder
+    /// Flush text builder
     fn flush_text(&mut self) {
         if self.text_builder.is_empty() {
             return;
@@ -274,9 +274,9 @@ impl NonStreamingProcessor {
         self.text_builder.clear();
     }
 
-    /// 刷新 thinking builder
+    /// Flush thinking builder
     fn flush_thinking(&mut self) {
-        // 如果既没有内容也没有签名，直接返回
+        // If neither content nor signature exists, return directly
         if self.thinking_builder.is_empty() && self.thinking_signature.is_none() {
             return;
         }
@@ -292,7 +292,7 @@ impl NonStreamingProcessor {
         self.thinking_builder.clear();
     }
 
-    /// 构建最终响应
+    /// Build the final response
     fn build_response(&self, gemini_response: &GeminiResponse) -> ClaudeResponse {
         let finish_reason = gemini_response
             .candidates
@@ -335,7 +335,7 @@ impl NonStreamingProcessor {
     }
 }
 
-/// 转换 Gemini 响应为 Claude 响应 (公共接口)
+/// Transform Gemini response to Claude response (public interface)
 pub fn transform_response(gemini_response: &GeminiResponse) -> Result<ClaudeResponse, String> {
     let mut processor = NonStreamingProcessor::new();
     Ok(processor.process(gemini_response))

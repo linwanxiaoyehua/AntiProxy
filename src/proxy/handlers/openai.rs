@@ -17,26 +17,26 @@ use crate::proxy::upstream::client::UpstreamClient;
 const MAX_RETRY_ATTEMPTS: usize = 3;
 use crate::proxy::session_manager::SessionManager;
 
-/// 响应格式类型
+/// Response format type
 #[derive(Clone, Copy)]
 enum ResponseFormat {
-    /// 标准 OpenAI Chat 格式
+    /// Standard OpenAI Chat format
     Chat,
-    /// Legacy Completions 格式
+    /// Legacy Completions format
     LegacyCompletion,
-    /// Codex 风格格式
+    /// Codex style format
     Codex,
 }
 
-/// 核心请求执行结果
+/// Core request execution result
 enum ExecuteResult {
-    /// 成功的流式响应
+    /// Successful streaming response
     StreamResponse(Response),
-    /// 成功的非流式响应 (Gemini 原始 JSON)
+    /// Successful non-streaming response (Gemini raw JSON)
     JsonResponse(Value),
-    /// 需要重试
+    /// Needs retry
     Retry { error: String, should_rotate: bool },
-    /// 不可重试的错误
+    /// Non-retryable error
     FatalError { status: StatusCode, message: String },
 }
 
@@ -54,8 +54,8 @@ fn extract_u32(value: &Value, path: &[&str]) -> u32 {
         .unwrap_or(0)
 }
 
-/// 核心请求执行函数 V2 - 接受预计算的 session_id 和 force_rotate 参数
-/// 解决了原版本中 session_id 在函数内部计算导致重试时账号切换的问题
+/// Core request execution function V2 - accepts pre-calculated session_id and force_rotate parameters
+/// Fixes the issue in original version where session_id calculated inside function caused account switching on retry
 async fn execute_openai_request_v2(
     state: &AppState,
     openai_req: &OpenAIRequest,
@@ -65,16 +65,16 @@ async fn execute_openai_request_v2(
     session_id: &str,
     response_format: ResponseFormat,
 ) -> ExecuteResult {
-    // 1. 模型路由与配置解析
+    // 1. Model routing and config parsing
     let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
         &openai_req.model,
         &*state.custom_mapping.read().await,
         &*state.openai_mapping.read().await,
         &*state.anthropic_mapping.read().await,
-        false, // OpenAI 请求不应用 Claude 家族映射
+        false, // OpenAI requests don't apply Claude family mapping
     );
 
-    // 将 OpenAI 工具转为 Value 数组以便探测联网
+    // Convert OpenAI tools to Value array for web search detection
     let tools_val: Option<Vec<Value>> = openai_req
         .tools
         .as_ref()
@@ -92,7 +92,7 @@ async fn execute_openai_request_v2(
         "gemini"
     };
 
-    // 2. 获取 Token (使用传入的 session_id 和 force_rotate)
+    // 2. Get Token (using passed session_id and force_rotate)
     let selected = match token_manager
         .get_token(quota_group, &config.request_type, force_rotate, Some(session_id))
         .await
@@ -113,14 +113,14 @@ async fn execute_openai_request_v2(
 
     info!("✓ Using account: {} (type: {})", email, config.request_type);
 
-    // 3. 转换请求
+    // 3. Transform request
     let gemini_body = transform_openai_request(openai_req, &project_id, &mapped_model);
 
     if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body) {
         debug!("[OpenAI-Request] Transformed Gemini Body:\n{}", body_json);
     }
 
-    // 4. 发送请求
+    // 4. Send request
     let method = "streamGenerateContent";
     let query_string = Some("alt=sse");
 
@@ -131,19 +131,19 @@ async fn execute_openai_request_v2(
         Ok(r) => r,
         Err(e) => {
             debug!("OpenAI Request failed: {}", e);
-            // 网络错误不需要轮换账号，可能是临时问题
+            // Network error doesn't need account rotation, might be temporary issue
             return ExecuteResult::Retry { error: e, should_rotate: false };
         }
     };
 
     let status = response.status();
 
-    // 5. 处理成功响应
+    // 5. Handle successful response
     if status.is_success() {
         let gemini_stream = response.bytes_stream();
         let model_clone = openai_req.model.clone();
 
-        // 根据响应格式选择不同的 SSE 流转换器
+        // Select different SSE stream transformer based on response format
         if openai_req.stream {
             let body = match response_format {
                 ResponseFormat::Chat => {
@@ -186,7 +186,7 @@ async fn execute_openai_request_v2(
         return ExecuteResult::JsonResponse(gemini_resp);
     }
 
-    // 6. 处理错误响应
+    // 6. Handle error response
     let status_code = status.as_u16();
     let retry_after = response
         .headers()
@@ -204,19 +204,19 @@ async fn execute_openai_request_v2(
         error_text
     );
 
-    // 判断是否应该轮换账号
+    // Determine whether to rotate account
     fn should_rotate_account(status_code: u16) -> bool {
         match status_code {
-            // 这些错误是账号级别的，需要轮换
+            // These errors are account-level, require rotation
             429 | 401 | 403 | 500 => true,
-            // 这些错误是服务端级别的，轮换账号无意义
+            // These errors are server-level, rotating account is meaningless
             400 | 503 | 529 => false,
-            // 其他错误默认不轮换
+            // Other errors default to no rotation
             _ => false,
         }
     }
 
-    // 429/529/503/500 智能处理
+    // 429/529/503/500 smart handling
     if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
         token_manager.mark_rate_limited(
             quota_group,
@@ -254,7 +254,7 @@ async fn execute_openai_request_v2(
         };
     }
 
-    // 401/403 触发账号轮换
+    // 401/403 triggers account rotation
     if status_code == 403 || status_code == 401 {
         tracing::warn!(
             "OpenAI Upstream {} on account {}, rotating account",
@@ -267,7 +267,7 @@ async fn execute_openai_request_v2(
         };
     }
 
-    // 其他错误不可重试
+    // Other errors are not retryable
     error!(
         "OpenAI Upstream non-retryable error {} on account {}: {}",
         status_code, email, error_text
@@ -278,7 +278,7 @@ async fn execute_openai_request_v2(
     }
 }
 
-/// 核心请求执行函数 - 保留用于向后兼容（已废弃，请使用 execute_openai_request_v2）
+/// Core request execution function - kept for backward compatibility (deprecated, use execute_openai_request_v2)
 #[allow(dead_code)]
 async fn execute_openai_request(
     state: &AppState,
@@ -289,7 +289,7 @@ async fn execute_openai_request(
     _max_attempts: usize,
     response_format: ResponseFormat,
 ) -> ExecuteResult {
-    // 兼容旧调用：attempt > 0 时强制轮换
+    // Backward compatible with old calls: force rotate when attempt > 0
     let session_id = SessionManager::extract_openai_session_id(openai_req);
     execute_openai_request_v2(
         state,
@@ -302,7 +302,7 @@ async fn execute_openai_request(
     ).await
 }
 
-/// 执行带重试的请求循环
+/// Execute request loop with retry
 async fn execute_with_retry(
     state: &AppState,
     openai_req: &OpenAIRequest,
@@ -313,11 +313,11 @@ async fn execute_with_retry(
     let pool_size = token_manager.len();
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
 
-    // [CRITICAL FIX] 提前计算 session_id，确保重试时不会改变
+    // [CRITICAL FIX] Pre-calculate session_id, ensure it doesn't change on retry
     let stable_session_id = SessionManager::extract_openai_session_id(openai_req);
 
     let mut last_error = String::new();
-    let mut force_rotate_next = false;  // 控制下一次循环是否轮换账号
+    let mut force_rotate_next = false;  // Control whether to rotate account in next iteration
 
     for _attempt in 0..max_attempts {
         match execute_openai_request_v2(
@@ -332,11 +332,11 @@ async fn execute_with_retry(
         .await
         {
             ExecuteResult::StreamResponse(resp) => {
-                // 流式响应已经在 execute_openai_request 中根据格式处理了
+                // Streaming response already processed by format in execute_openai_request
                 return Ok(resp);
             }
             ExecuteResult::JsonResponse(gemini_resp) => {
-                // 非流式响应 - 根据格式转换
+                // Non-streaming response - transform based on format
                 if !openai_req.stream {
                     let cached_tokens = extract_u32(
                         &gemini_resp,
@@ -443,12 +443,12 @@ pub async fn handle_chat_completions(
 
     debug!("Received OpenAI request for model: {}", openai_req.model);
 
-    // 使用公共执行函数
+    // Use shared execution function
     execute_with_retry(&state, &openai_req, ResponseFormat::Chat).await
 }
 
-/// 处理 Legacy Completions API (/v1/completions)
-/// 将 Prompt 转换为 Chat Message 格式，复用 handle_chat_completions
+/// Handle Legacy Completions API (/v1/completions)
+/// Convert Prompt to Chat Message format, reuse handle_chat_completions
 pub async fn handle_completions(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
@@ -520,11 +520,11 @@ pub async fn handle_completions(
 
                         if let Some(parts) = content {
                             for part in parts {
-                                // 处理文本块
+                                // Handle text blocks
                                 if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
                                     text_parts.push(text.to_string());
                                 }
-                                // [NEW] 处理图像块 (Codex input_image 格式)
+                                // [NEW] Handle image blocks (Codex input_image format)
                                 else if part.get("type").and_then(|v| v.as_str())
                                     == Some("input_image")
                                 {
@@ -538,7 +538,7 @@ pub async fn handle_completions(
                                         debug!("[Codex] Found input_image: {}", image_url);
                                     }
                                 }
-                                // [NEW] 兼容标准 OpenAI image_url 格式
+                                // [NEW] Compatible with standard OpenAI image_url format
                                 else if part.get("type").and_then(|v| v.as_str())
                                     == Some("image_url")
                                 {
@@ -552,7 +552,7 @@ pub async fn handle_completions(
                             }
                         }
 
-                        // 构造消息内容：如果有图像则使用数组格式
+                        // Build message content: use array format if there are images
                         if image_parts.is_empty() {
                             messages.push(json!({
                                 "role": role,
@@ -703,7 +703,7 @@ pub async fn handle_completions(
         }
     }
 
-    // 2. 解析请求并使用公共执行函数
+    // 2. Parse request and use shared execution function
     let mut openai_req: OpenAIRequest = serde_json::from_value(body.clone())
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
 
@@ -724,14 +724,14 @@ pub async fn handle_completions(
 
     debug!("Received Completions request for model: {}", openai_req.model);
 
-    // 根据请求类型选择响应格式
+    // Select response format based on request type
     let response_format = if is_codex_style {
         ResponseFormat::Codex
     } else {
         ResponseFormat::LegacyCompletion
     };
 
-    // 使用公共执行函数
+    // Use shared execution function
     execute_with_retry(&state, &openai_req, response_format).await
 }
 
@@ -760,12 +760,12 @@ pub async fn handle_list_models(State(state): State<AppState>) -> impl IntoRespo
 }
 
 /// OpenAI Images API: POST /v1/images/generations
-/// 处理图像生成请求，转换为 Gemini API 格式
+/// Handle image generation request, transform to Gemini API format
 pub async fn handle_images_generations(
     State(state): State<AppState>,
     Json(body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // 1. 解析请求参数
+    // 1. Parse request parameters
     let prompt = body.get("prompt").and_then(|v| v.as_str()).ok_or((
         StatusCode::BAD_REQUEST,
         "Missing 'prompt' field".to_string(),
@@ -807,14 +807,14 @@ pub async fn handle_images_generations(
         style
     );
 
-    // 2. 解析尺寸为宽高比
+    // 2. Parse size to aspect ratio
     let aspect_ratio = match size {
         "1792x768" | "2560x1080" => "21:9", // Ultra-wide
         "1792x1024" | "1920x1080" => "16:9",
         "1024x1792" | "1080x1920" => "9:16",
         "1024x768" | "1280x960" => "4:3",
         "768x1024" | "960x1280" => "3:4",
-        _ => "1:1", // 默认 1024x1024
+        _ => "1:1", // Default 1024x1024
     };
 
     // Prompt Enhancement
@@ -828,7 +828,7 @@ pub async fn handle_images_generations(
         _ => {}
     }
 
-    // 3. 获取 Token
+    // 3. Get Token
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager;
 
@@ -851,7 +851,7 @@ pub async fn handle_images_generations(
 
     info!("✓ Using account: {} for image generation", email);
 
-    // 4. 并发发送请求 (解决 candidateCount > 1 不支持的问题)
+    // 4. Send concurrent requests (solve candidateCount > 1 not supported issue)
     let mut tasks = Vec::new();
 
     for _ in 0..n {
@@ -875,7 +875,7 @@ pub async fn handle_images_generations(
                         "parts": [{"text": final_prompt}]
                     }],
                     "generationConfig": {
-                        "candidateCount": 1, // 强制单张
+                        "candidateCount": 1, // Force single image
                         "imageConfig": {
                             "aspectRatio": aspect_ratio
                         }
@@ -910,7 +910,7 @@ pub async fn handle_images_generations(
         }));
     }
 
-    // 5. 收集结果
+    // 5. Collect results
     let mut images: Vec<Value> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
@@ -972,7 +972,7 @@ pub async fn handle_images_generations(
         return Err((StatusCode::BAD_GATEWAY, error_msg));
     }
 
-    // 部分成功时记录警告
+    // Log warning on partial success
     if !errors.is_empty() {
         tracing::warn!(
             "[Images] Partial success: {} out of {} requests succeeded. Errors: {}",
@@ -988,7 +988,7 @@ pub async fn handle_images_generations(
         n
     );
 
-    // 6. 构建 OpenAI 格式响应
+    // 6. Build OpenAI format response
     let openai_response = json!({
         "created": chrono::Utc::now().timestamp(),
         "data": images
@@ -1084,7 +1084,7 @@ pub async fn handle_images_edits(
     // But if users see raw text, it means client defaulted to 'url' or we defaulted to 'url'.
     // Let's keep the log to confirm.
 
-    // 1. 获取 Upstream
+    // 1. Get Upstream
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager;
     // Fix: Proper get_token call with correct signature and unwrap (using image_gen quota)
@@ -1103,7 +1103,7 @@ pub async fn handle_images_edits(
     let access_token = selected.access_token;
     let project_id = selected.project_id;
 
-    // 2. 映射配置
+    // 2. Map configuration
     let mut contents_parts = Vec::new();
 
     contents_parts.push(json!({
@@ -1128,7 +1128,7 @@ pub async fn handle_images_edits(
         }));
     }
 
-    // 构造 Gemini 内网 API Body (Envelope Structure)
+    // Build Gemini internal API Body (Envelope Structure)
     let gemini_body = json!({
         "project": project_id,
         "requestId": format!("img-edit-{}", uuid::Uuid::new_v4()),

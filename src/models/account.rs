@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use super::{token::TokenData, quota::QuotaData};
 
-/// 账号数据结构
+/// Account data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub id: String,
@@ -60,7 +60,7 @@ impl Account {
     }
 }
 
-/// 账号索引数据（accounts.json）
+/// Account index data (accounts.json)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountIndex {
     pub version: String,
@@ -68,7 +68,7 @@ pub struct AccountIndex {
     pub current_account_id: Option<String>,
 }
 
-/// 账号摘要信息
+/// Account summary information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountSummary {
     pub id: String,

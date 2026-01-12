@@ -16,15 +16,15 @@ impl Default for ProxyAuthMode {
     }
 }
 
-/// 反代服务配置
+/// Reverse proxy service configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
-    /// 是否启用反代服务
+    /// Whether to enable the reverse proxy service
     pub enabled: bool,
 
-    /// 是否允许局域网访问
-    /// - false: 仅本机访问 127.0.0.1（默认，隐私优先）
-    /// - true: 允许局域网访问 0.0.0.0
+    /// Whether to allow LAN access
+    /// - false: localhost only 127.0.0.1 (default, privacy-first)
+    /// - true: allow LAN access 0.0.0.0
     #[serde(default)]
     pub allow_lan_access: bool,
 
@@ -36,55 +36,55 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub auth_mode: ProxyAuthMode,
     
-    /// 监听端口
+    /// Listen port
     pub port: u16,
     
-    /// API 密钥
+    /// API key
     pub api_key: String,
     
 
-    /// 是否自动启动
+    /// Whether to auto-start
     pub auto_start: bool,
 
-    /// Anthropic 模型映射表 (key: Claude模型名, value: Gemini模型名)
+    /// Anthropic model mapping table (key: Claude model name, value: Gemini model name)
     #[serde(default)]
     pub anthropic_mapping: std::collections::HashMap<String, String>,
 
-    /// OpenAI 模型映射表 (key: OpenAI模型组, value: Gemini模型名)
+    /// OpenAI model mapping table (key: OpenAI model group, value: Gemini model name)
     #[serde(default)]
     pub openai_mapping: std::collections::HashMap<String, String>,
 
-    /// 自定义精确模型映射表 (key: 原始模型名, value: 目标模型名)
+    /// Custom exact model mapping table (key: original model name, value: target model name)
     #[serde(default)]
     pub custom_mapping: std::collections::HashMap<String, String>,
 
-    /// API 请求超时时间(秒)
+    /// API request timeout (seconds)
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
 
-    /// 是否开启请求日志记录 (监控)
+    /// Whether to enable request logging (monitoring)
     #[serde(default)]
     pub enable_logging: bool,
 
-    /// 上游代理配置
+    /// Upstream proxy configuration
     #[serde(default)]
     pub upstream_proxy: UpstreamProxyConfig,
 
-    /// 账号调度配置 (粘性会话/限流重试)
+    /// Account scheduling configuration (sticky session/rate limit retry)
     #[serde(default)]
     pub scheduling: crate::proxy::sticky_config::StickySessionConfig,
 }
 
-/// 上游代理配置
+/// Upstream proxy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamProxyConfig {
-    /// 是否启用
+    /// Whether enabled
     #[serde(default)]
     pub enabled: bool,
-    /// 代理地址 (http://, https://, socks5://)
+    /// Proxy URL (http://, https://, socks5://)
     #[serde(default)]
     pub url: String,
-    /// 自定义 User-Agent 字符串（用于上游请求）
+    /// Custom User-Agent string (for upstream requests)
     #[serde(default = "default_user_agent")]
     pub user_agent: String,
 }
@@ -107,7 +107,7 @@ impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            allow_lan_access: false, // 默认仅本机访问，隐私优先
+            allow_lan_access: false, // Default localhost only, privacy-first
             auth_mode: ProxyAuthMode::default(),
             port: 8045,
             api_key: format!("sk-{}", uuid::Uuid::new_v4().simple()),
@@ -116,7 +116,7 @@ impl Default for ProxyConfig {
             openai_mapping: std::collections::HashMap::new(),
             custom_mapping: std::collections::HashMap::new(),
             request_timeout: default_request_timeout(),
-            enable_logging: false, // 默认关闭，节省性能
+            enable_logging: false, // Default off, save performance
             upstream_proxy: UpstreamProxyConfig::default(),
             scheduling: crate::proxy::sticky_config::StickySessionConfig::default(),
         }
@@ -124,13 +124,13 @@ impl Default for ProxyConfig {
 }
 
 fn default_request_timeout() -> u64 {
-    120  // 默认 120 秒,原来 60 秒太短
+    120  // Default 120 seconds, original 60 seconds was too short
 }
 
 impl ProxyConfig {
-    /// 获取实际的监听地址
-    /// - allow_lan_access = false: 返回 "127.0.0.1"（默认，隐私优先）
-    /// - allow_lan_access = true: 返回 "0.0.0.0"（允许局域网访问）
+    /// Get the actual bind address
+    /// - allow_lan_access = false: returns "127.0.0.1" (default, privacy-first)
+    /// - allow_lan_access = true: returns "0.0.0.0" (allow LAN access)
     pub fn get_bind_address(&self) -> &str {
         if self.allow_lan_access {
             "0.0.0.0"
