@@ -61,6 +61,7 @@ pub fn create_openai_sse_stream(
         // Prefixed with _ as these are reserved for future usage reporting
         let mut _last_prompt_tokens: u32 = 0;
         let mut _last_completion_tokens: u32 = 0;
+        let mut role_sent = false;
 
         while let Some(item) = gemini_stream.next().await {
             match item {
@@ -204,6 +205,13 @@ pub fn create_openai_sse_stream(
 
                                     // Construct OpenAI SSE chunk with delta
                                     let mut delta = serde_json::Map::new();
+                                    
+                                    // Add role on first chunk with content or tool calls
+                                    if !role_sent && (!content_out.is_empty() || !tool_calls.is_empty()) {
+                                        delta.insert("role".to_string(), json!("assistant"));
+                                        role_sent = true;
+                                    }
+                                    
                                     if !content_out.is_empty() {
                                         delta.insert("content".to_string(), json!(content_out));
                                     }
