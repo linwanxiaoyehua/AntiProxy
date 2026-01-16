@@ -114,7 +114,7 @@ pub fn create_openai_sse_stream(
                                     let mut tool_call_index = 0; // Track tool call index separately
                                     
                                     if let Some(parts_list) = parts {
-                                        for (part_index, part) in parts_list.iter().enumerate() {
+                                        for part in parts_list.iter() {
                                             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                                 content_out.push_str(text);
                                             }
@@ -144,7 +144,7 @@ pub fn create_openai_sse_stream(
                                                 let id = fc.get("id")
                                                     .and_then(|v| v.as_str())
                                                     .map(|s| s.to_string())
-                                                    .unwrap_or_else(|| format!("call_{}", part_index));
+                                                    .unwrap_or_else(|| format!("{}-{}", name, Uuid::new_v4()));
 
                                                 tool_calls.push(json!({
                                                     "index": tool_call_index,
