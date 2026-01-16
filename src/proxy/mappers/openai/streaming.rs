@@ -212,8 +212,8 @@ pub fn create_openai_sse_stream(
                                     // Construct OpenAI SSE chunk with delta
                                     let mut delta = serde_json::Map::new();
                                     
-                                    // Add role on first chunk with content or tool calls
-                                    if !role_sent && (!content_out.is_empty() || !tool_calls.is_empty()) {
+                                    // Add role on first chunk with content or tool calls, or on finish chunk if role not sent yet
+                                    if !role_sent && (!content_out.is_empty() || !tool_calls.is_empty() || finish_reason.is_some()) {
                                         delta.insert("role".to_string(), json!("assistant"));
                                         role_sent = true;
                                     }
