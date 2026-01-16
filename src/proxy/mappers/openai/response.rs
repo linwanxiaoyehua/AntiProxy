@@ -46,7 +46,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                 let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
                 let args = fc
                     .get("args")
-                    .map(|v| v.to_string())
+                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string()))
                     .unwrap_or_else(|| "{}".to_string());
                 let id = fc
                     .get("id")
