@@ -109,9 +109,10 @@ pub fn create_openai_sse_stream(
                                     }
 
                                     let mut content_out = String::new();
+                                    let mut tool_calls: Vec<Value> = Vec::new();
                                     
                                     if let Some(parts_list) = parts {
-                                        for part in parts_list {
+                                        for (part_index, part) in parts_list.iter().enumerate() {
                                             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                                 content_out.push_str(text);
                                             }
@@ -130,6 +131,26 @@ pub fn create_openai_sse_stream(
                                                 if !data.is_empty() {
                                                     content_out.push_str(&format!("![image](data:{};base64,{})", mime_type, data));
                                                 }
+                                            }
+
+                                            // Handle function call (tool call in OpenAI terminology)
+                                            if let Some(fc) = part.get("functionCall") {
+                                                let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                                let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+                                                let id = fc.get("id")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(|s| s.to_string())
+                                                    .unwrap_or_else(|| format!("call_{}", part_index));
+
+                                                tool_calls.push(json!({
+                                                    "index": part_index,
+                                                    "id": id,
+                                                    "type": "function",
+                                                    "function": {
+                                                        "name": name,
+                                                        "arguments": args
+                                                    }
+                                                }));
                                             }
                                         }
                                     }
@@ -164,8 +185,8 @@ pub fn create_openai_sse_stream(
                                         }
                                     }
 
-                                    if content_out.is_empty() {
-                                        // Skip empty chunks if no text/grounding was found
+                                    if content_out.is_empty() && tool_calls.is_empty() {
+                                        // Skip empty chunks if no text/grounding/tool_calls were found
                                         if candidate.and_then(|c| c.get("finishReason")).is_none() {
                                             continue;
                                         }
@@ -181,7 +202,15 @@ pub fn create_openai_sse_stream(
                                             _ => f,
                                         });
 
-                                    // Construct OpenAI SSE chunk
+                                    // Construct OpenAI SSE chunk with delta
+                                    let mut delta = serde_json::Map::new();
+                                    if !content_out.is_empty() {
+                                        delta.insert("content".to_string(), json!(content_out));
+                                    }
+                                    if !tool_calls.is_empty() {
+                                        delta.insert("tool_calls".to_string(), json!(tool_calls));
+                                    }
+
                                     let openai_chunk = json!({
                                         "id": format!("chatcmpl-{}", Uuid::new_v4()),
                                         "object": "chat.completion.chunk",
@@ -190,9 +219,7 @@ pub fn create_openai_sse_stream(
                                         "choices": [
                                             {
                                                 "index": 0,
-                                                "delta": {
-                                                    "content": content_out
-                                                },
+                                                "delta": delta,
                                                 "finish_reason": finish_reason
                                             }
                                         ]
