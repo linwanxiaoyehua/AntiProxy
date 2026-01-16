@@ -111,10 +111,12 @@ pub fn create_openai_sse_stream(
 
                                     let mut content_out = String::new();
                                     let mut tool_calls: Vec<Value> = Vec::new();
-                                    let mut tool_call_index = 0; // Track tool call index separately
+                                    // Track tool call index separately to ensure sequential indexing (0, 1, 2...)
+                                    // across all tool calls per OpenAI specification, independent of part positions
+                                    let mut tool_call_index = 0;
                                     
                                     if let Some(parts_list) = parts {
-                                        for part in parts_list.iter() {
+                                        for part in parts_list {
                                             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                                 content_out.push_str(text);
                                             }
